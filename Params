@@ -1,0 +1,20 @@
+How do you want the points created? (0 - Read from SaveVertices.dat, 1 - Monte Carlo, 2 - Generalized Spiral)
+1
+If you want them generated, how many points do you want?
+162
+How many iterations do you want to run for, if convergence isn't reached?
+5
+How often, in iterations, do you want the point set written to a file? (Longer is better)
+0
+How many sub-triangle divisions would you like? (Minimum of 1, Causes every triangle to be divided into 4^n triangles)
+1
+How many bisections do you want until your final point set? (Each bisection maps n -> 4*n-6)
+0
+What do you want to check convergence on? (0 - Max Iterations, 1 - Average Generator Movement, 2 - Maximum Generator Movement)
+1
+What do you want your convergence criteria to be? (eps = 1E-10)
+1E-14
+What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point)
+0
+What sorting method do you want to use? (0 - dot product, 2 - voronoi)
+1
