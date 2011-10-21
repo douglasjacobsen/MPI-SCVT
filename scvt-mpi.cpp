@@ -90,6 +90,8 @@ class region{/*{{{*/
 		double input_radius;
 		vector<pnt> points;
 		vector<tri> triangles;
+		vector<bdry_line> boundaries;
+		vector<int> boundary_flags;
 		vector<int> neighbors; // First Level of Neighbors
 		vector<int> neighbors1; // First Level of Neighbors + Self
 		vector<int> neighbors2; // Second Level of Neighbors + First Level of Neighbors + Self
@@ -167,7 +169,10 @@ int num_bisections = 0;
 int conv = 0;
 int restart = 0;
 int sort_method = sort_dot;
+int bdry_pnt_format = 0;
 double eps = 1.0E-10;
+
+int num_bdrys;
 
 //Define variable for quadrature rules
 int quad_rule = 2;
@@ -192,6 +197,11 @@ vector<pnt> points;
 vector<pnt> n_points;
 vector<pnt>::iterator point_itr;
 
+vector<bdry_line> boundary_segments;
+vector<bdry_line>::iterator boundary_itr;
+vector<int> all_boundary_flags;
+vector<double> dist_to_boundary;
+
 //Each processor has a list of all regions, as well as it's own regions (only one per processor currently)
 vector<region> my_regions;
 vector<region> regions;
@@ -211,6 +221,7 @@ vector<tri>::iterator tri_itr;
 void readParamsFile();
 void buildRegions();
 void printRegions();
+void readBoundaries();
 /*}}}*/
 /* ***** Bisect Edges Routines *****{{{*/
 void bisectEdges(int end);
@@ -299,6 +310,7 @@ int main(int argc, char **argv){
 			cout << "Points being created with Generalized Spiral." << endl;
 			makeGeneralizedSpiralPoints(num_pts);
 		}
+		readBoundaries();
 		buildRegions();
 
 		ofstream pts_out("point_restart_0.dat");
@@ -561,6 +573,8 @@ void readParamsFile(){/*{{{*/
 		pout << "2" << endl;
 		pout << "What sorting method do you want to use? (0 - dot product, 2 - voronoi)" << endl;
 		pout << "0" << endl;
+		pout << "Are boundary points given in lat-lon or x-y-z? (0 - lat lon, 1 x y z)" << endl;
+		pout << "0" << endl;
 		pout.close();
 
 		exit(1);
@@ -597,6 +611,9 @@ void readParamsFile(){/*{{{*/
 	getline(params,junk);
 	params >> sort_method;
 	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> bdry_pnt_format;
+	params.ignore(10000,'\n');
 
 	params.close();
 }/*}}}*/
@@ -613,6 +630,7 @@ void buildRegions(){/*{{{*/
 	pnt p;
 	double loc_radius, max_radius;
 	double alpha, beta;
+	double distance;
 	int min_connectivity;
 	int t1, t2, t3;
 	int i;
@@ -742,6 +760,16 @@ void buildRegions(){/*{{{*/
 
 	region_neighbors.clear();
 
+	for(region_itr = regions.begin(); region_itr != regions.end(); region_itr++){
+		for(boundary_itr = boundary_segments.begin(); boundary_itr != boundary_segments.end(); boundary_itr++){
+			distance = (*boundary_itr).distanceToPoint((*region_itr).center);
+
+			if(distance <= (*region_itr).radius){
+				(*region_itr).boundaries.push_back((*boundary_itr));
+			}
+		}
+	}
+
 }/*}}}*/
 void printRegions(){/*{{{*/
 	// This function is only for debugging purposes.
@@ -769,6 +797,87 @@ void printRegions(){/*{{{*/
 
 	rp_out.close();
 	clearRegions(regions);
+}/*}}}*/
+void readBoundaries(){/*{{{*/
+	ifstream boundaries_in("SaveBoundaries");
+	double lat1, lon1;
+	double x1, y1, z1;
+	double lat2, lon2;
+	double x2, y2, z2;
+	double dtr;
+	bdry_line segment;
+	bdry_pnt p1, p2;
+	bool SCproj;
+	int i;
+
+	i = 0;
+	dtr = M_PI/180.0;
+
+	if(boundaries_in){
+		while(!boundaries_in.eof()){
+			SCproj = false;
+			if(bdry_pnt_format == 0){
+				boundaries_in >> lat1 >> lon1;
+				boundaries_in.ignore(10000,'\n');
+
+				p1.lat = lat1*dtr;
+				p1.lon = lon1*dtr;
+				p1.fixLat();
+				p1.fixLon();
+				p1.convertToCart();
+
+				boundaries_in >> lat2 >> lon2;
+				boundaries_in.ignore(10000,'\n');
+
+				p2.lat = lat2*dtr;
+				p2.lon = lon2*dtr;
+				p2.fixLat();
+				p2.fixLon();
+				p2.convertToCart();
+
+				if(lat1 == lat2 && lat1 != 0.0){ 
+					SCproj = true;
+				}
+			} else if (bdry_pnt_format == 1){
+				boundaries_in >> x1 >> y1 >> z1;
+				boundaries_in.ignore(10000,'\n');
+
+				p1.x = x1;
+				p1.y = y1;
+				p1.z = z1;
+				p1.convertToLatLon();
+
+
+				boundaries_in >> x2 >> y2 >> z2;
+				boundaries_in.ignore(10000,'\n');
+
+				p2.x = x2;
+				p2.y = y2;
+				p2.z = z2;
+				p2.convertToLatLon();
+			}
+
+
+			p1.idx = i;
+			p2.idx = i+1;
+
+			p1.normalize();
+			p2.normalize();
+
+			segment.end_pts.first = p1;
+			segment.end_pts.second = p2;
+			segment.idx = i;
+			segment.SCproj = SCproj;
+			if(boundaries_in.good()){
+				boundary_segments.push_back(segment);
+			}
+			i++;
+		}
+	}
+
+	num_bdrys = boundary_segments.size();
+
+	cout << "Read in " << num_bdrys << " boundary segments." << endl;
 }/*}}}*/
 /* }}} */
 /* ***** Bisect Edges Routines ***** {{{ */
@@ -1601,6 +1710,8 @@ void triangulateRegions(vector<region> &region_vec){/*{{{*/
 	double criteria;
 	double s;
 	double min_dir;
+	double a_dist, b_dist, c_dist;
+	double min_dist;
 	tri t;
 	int i;
 	int vi1, vi2, vi3;
@@ -1610,7 +1721,12 @@ void triangulateRegions(vector<region> &region_vec){/*{{{*/
 	cerr << "Triangulating points (local) " << id << endl;
 #endif
 
+	all_boundary_flags.assign(num_pts, -1);
+	dist_to_boundary.assign(num_pts, 0.0);
+
 	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
+		(*region_itr).boundary_flags.assign((*region_itr).points.size(), -1);
+
 		in.numberofpoints = (*region_itr).points.size();
 		in.numberofpointattributes = 0;
 		in.pointlist = (double *) malloc(in.numberofpoints * 2 * sizeof(double));
@@ -1685,6 +1801,48 @@ void triangulateRegions(vector<region> &region_vec){/*{{{*/
 			if(criteria < (*region_itr).radius){
 				t = tri(vi1, vi2, vi3);
 				(*region_itr).triangles.push_back(t);
+
+				for(boundary_itr = (*region_itr).boundaries.begin(); boundary_itr != (*region_itr).boundaries.end(); boundary_itr++){
+					if((*boundary_itr).triangleOnBoundary(a, b, c)){
+						a_dist = (*boundary_itr).distanceToPoint(a);
+						b_dist = (*boundary_itr).distanceToPoint(b);
+						c_dist = (*boundary_itr).distanceToPoint(c);
+
+						min_dist = min(a_dist, min(b_dist, c_dist));
+
+						if(min_dist == a_dist){
+							if(all_boundary_flags.at(vi1) == -1){
+								all_boundary_flags.at(vi1) = (*boundary_itr).idx;
+								dist_to_boundary.at(vi1) = a_dist;
+							} else {
+								if(a_dist < dist_to_boundary.at(vi1)){
+									all_boundary_flags.at(vi1) = (*boundary_itr).idx;
+									dist_to_boundary.at(vi1) = a_dist;
+								}
+							}
+						} else if(min_dist == b_dist){
+							if(all_boundary_flags.at(vi2) == -1){
+								all_boundary_flags.at(vi2) = (*boundary_itr).idx;
+								dist_to_boundary.at(vi2) = b_dist;
+							} else {
+								if(b_dist < dist_to_boundary.at(vi2)){
+									all_boundary_flags.at(vi2) = (*boundary_itr).idx;
+									dist_to_boundary.at(vi2) = b_dist;
+								}
+							}
+						} else if(min_dist == c_dist){
+							if(all_boundary_flags.at(vi3) == -1){
+								all_boundary_flags.at(vi3) = (*boundary_itr).idx;
+								dist_to_boundary.at(vi3) = c_dist;
+							} else {
+								if(c_dist < dist_to_boundary.at(vi3)){
+									all_boundary_flags.at(vi3) = (*boundary_itr).idx;
+									dist_to_boundary.at(vi3) = c_dist;
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 		free(in.pointlist);
@@ -1693,6 +1851,12 @@ void triangulateRegions(vector<region> &region_vec){/*{{{*/
 		free(out.pointlist);
 		free(out.trianglelist);
 	}
+
+	ofstream boundary_flags("bdry_info.dat");
+	for(i = 0; i < points.size(); i++){
+		boundary_flags << all_boundary_flags.at(i)+1 << endl;
+	}
+	boundary_flags.close();
 #ifdef _DEBUG
 	cerr << "Done triangulating points (local) " << id << endl;
 #endif
@@ -1724,6 +1888,8 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 
 	tops = new pnt[points.size()];
 	bots = new double[points.size()];
+
+	all_boundary_flags.assign(points.size(), -1);
 
 	for(i = 0; i < points.size(); i++){
 		tops[i] = pnt(0.0,0.0,0.0,0,i);
@@ -1851,7 +2017,13 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 
 	n_points.clear();
 	for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
-		if(bots[(*point_itr).idx] != 0.0 && !(*point_itr).isBdry ){
+		if(all_boundary_flags.at((*point_itr).idx) != -1 && !(*point_itr).isBdry){
+			np = boundary_segments.at(all_boundary_flags.at((*point_itr).idx)).projectedPoint((*point_itr));
+			np.idx = (*point_itr).idx;
+			np.isBdry = (*point_itr).isBdry;
+			np.normalize();
+			n_points.push_back(np);
+		} else if(bots[(*point_itr).idx] != 0.0 && !(*point_itr).isBdry ){
 			np = tops[(*point_itr).idx]/bots[(*point_itr).idx];
 			np.idx = (*point_itr).idx;
 			np.isBdry = (*point_itr).isBdry;
@@ -2404,7 +2576,27 @@ void writePointsAsRestart(const int it){/*{{{*/
 }/*}}}*/
 double density(const pnt &p){/*{{{*/
 	//density returns the value of the density function at point p
-	return 1.0; // Uniform density
+//	return 1.0; // Uniform density
+
+	double lon;
+	double dtr;
+	double dens;
+	double slope;
+
+	dtr = M_PI/180.0;
+
+	lon = 0.0 * dtr;
+
+	slope = .9 / M_PI;
+
+	if(p.getLon() > M_PI){
+		dens = 1.0 - (p.getLon() - M_PI) * slope;
+	} else {
+		dens = 1.0 - (p.getLon()) * slope;
+	}
+
+	return pow(dens, 4);
+
 
 	/* Density function for Shallow Water Test Case 5 
 	pnt cent;
@@ -2415,11 +2607,12 @@ double density(const pnt &p){/*{{{*/
 	double width, trans_cent;
 
 	//cent = pnt(0.0, -0.866025403784439, 0.5);
-	cent = pnt(0.0, 0.866025403784439, -0.5);
+//	cent = pnt(0.0, 0.866025403784439, -0.5);
+	cent = pnt(0.0, 0.0, 1.0);
 	cent.normalize();
 
 	width = 0.15;
-	min_val = 1.0/4.0;
+	min_val = 1.0/10.0;
 	min_val = pow(min_val,4);
 	trans_cent = 30.0*M_PI/180.0;
 	norm = 1.0/(1.0-min_val);

@@ -3,6 +3,8 @@
 #include <iostream>
 #include <iomanip>
 #include <fstream>
+#include <cmath>
+#include <utility>
 
 class pnt {/*{{{*/
 	private:
@@ -182,6 +184,20 @@ class pnt {/*{{{*/
 		double magnitude() const{/*{{{*/
 			return sqrt(x*x + y*y + z*z);
 		}/*}}}*/
+		double getLat() const {/*{{{*/
+			return asin(z);			
+		}/*}}}*/
+		double getLon() const {/*{{{*/
+			double lon;
+
+			lon = atan2(y,x);
+
+			if(lon < 0){
+				return 2.0 * M_PI + lon;
+			} else {
+				return lon;
+			}
+		}/*}}}*/
 		double magnitude2() const {/*{{{*/
 			return x*x + y*y + z*z;
 		}/*}}}*/
@@ -205,6 +221,205 @@ class pnt {/*{{{*/
 			return (size_t)p.idx;
 		}
 	};/*}}}*/
+};/*}}}*/
+class bdry_pnt {/*{{{*/
+	private:
+		friend class boost::serialization::access;
+		template<class Archive>
+			void serialize(Archive & ar, const unsigned int version)
+			{
+				ar & x;
+				ar & y;
+				ar & z;
+				ar & lat;
+				ar & lon;
+				ar & idx;
+			}
+	public:
+		double x, y, z;
+		double lat, lon;
+		int idx;
+
+
+		bdry_pnt(double x_, double y_, double z_, double lat_, double lon_, int idx_)
+			:  x(x_), y(y_), z(z_), lat(lat_), lon(lon_), idx(idx_) {	}
+
+		bdry_pnt(double x_, double y_, double z_, int idx_)
+			: x(x_), y(y_), z(z_), idx(idx_) { }
+
+		bdry_pnt(double lat_, double lon_, int idx_)
+			: lat(lat_), lon(lon_), idx(idx_) { }
+
+		bdry_pnt(double x_, double y_, double z_)
+			: x(x_), y(y_), z(z_), idx(0) { }
+
+		bdry_pnt(double lat_, double lon_)
+			: lat(lat_), lon(lon_), idx(0) { }
+
+		bdry_pnt()
+			: x(0.0), y(0.0), z(0.0), lat(0.0), lon(0.0), idx(0) { }
+
+		friend std::ostream & operator<<(std::ostream &os, const bdry_pnt &p);
+		friend std::istream & operator>>(std::istream &is, bdry_pnt &p);
+
+		bdry_pnt& operator=(const bdry_pnt &p){/*{{{*/
+			x = p.x;
+			y = p.y;
+			z = p.z;
+			lat = p.lat;
+			lon = p.lon;
+			idx = p.idx;
+			return *this;
+		}/*}}}*/
+		bool operator==(const bdry_pnt &p) const {/*{{{*/
+			return (x == p.x) & (y == p.y) & (z == p.z);
+		}/*}}}*/
+		bdry_pnt operator-(const bdry_pnt &p) const {/*{{{*/
+			double x_, y_, z_;
+
+			x_ = x-p.x;
+			y_ = y-p.y;
+			z_ = z-p.z;
+
+			return bdry_pnt(x_,y_,z_);
+		}/*}}}*/
+		bdry_pnt operator+(const bdry_pnt &p) const {/*{{{*/
+			double x_, y_, z_;
+
+			x_ = x+p.x;
+			y_ = y+p.y;
+			z_ = z+p.z;
+
+			return bdry_pnt(x_,y_,z_);
+		}/*}}}*/
+		bdry_pnt& operator/=(double d){/*{{{*/
+			if(d == 0.0){
+				std::cout << "pnt: operator /=" << std::endl << (*this) << std::endl;
+			}
+			assert(d != 0.0);
+			x = x/d;
+			y = y/d;
+			z = z/d;
+			return *this;
+		}/*}}}*/
+		bdry_pnt& operator+=(const bdry_pnt &p){/*{{{*/
+			x += p.x;
+			y += p.y;
+			z += p.z;
+
+			return *this;
+		}/*}}}*/
+		double operator[](int i) const {/*{{{*/
+			if(i == 0){
+				return x;
+			} else if(i == 1){
+				return y;
+			} else {
+				return z;
+			}
+		}/*}}}*/
+		void normalize(){/*{{{*/
+			double norm;
+
+			norm = x*x + y*y + z*z;
+			if(norm == 0){
+				std::cout << "bdry_pnt: normalize" << std::endl;
+				std::cout << x << " " << y << " " << z << " " << idx << std::endl;
+
+				assert(norm != 0);
+			}	
+			norm = sqrt(norm);
+
+			x = x/norm;
+			y = y/norm;
+			z = z/norm;
+		}/*}}}*/
+		double dot(const bdry_pnt &p) const {/*{{{*/
+			double junk;
+			junk = x*p.x+y*p.y+z*p.z;
+
+			return junk;
+		}/*}}}*/
+		double dotForDistance(const bdry_pnt &p) const {/*{{{*/
+			double junk;
+			junk = x*p.x+y*p.y+z*p.z;
+
+			junk = junk - 1.0;
+
+			return fabs(junk);
+		}/*}}}*/
+		double dotForAngle(const bdry_pnt &p) const {/*{{{*/
+			double junk;
+			junk = x*p.x+y*p.y+z*p.z;
+			if(junk > 1.0){
+				junk = 1.0;
+			}
+
+			if(junk < -1.0){
+				junk = -1.0;
+			}
+			return acos(junk);
+		}/*}}}*/
+		bdry_pnt cross(const bdry_pnt &p) const {/*{{{*/
+			double x_, y_, z_;
+
+			x_ = y*p.z - p.y*z;
+			y_ = z*p.x - p.z*x;
+			z_ = x*p.y - p.x*y;
+
+			return bdry_pnt(x_,y_,z_);
+		}/*}}}*/
+		double magnitude() const{/*{{{*/
+			return sqrt(x*x + y*y + z*z);
+		}/*}}}*/
+		inline double getLat() const {/*{{{*/
+			return lat;
+		}/*}}}*/
+		inline double getLon() const {/*{{{*/
+			return lon;
+		}/*}}}*/
+		inline double buildLat(){/*{{{*/
+			lat = asin(z);
+
+			fixLat();
+		}/*}}}*/
+		inline double buildLon(){/*{{{*/
+			lon = atan2(y,x);
+
+			fixLon();
+		}/*}}}*/
+		inline double fixLat(){/*{{{*/
+			while(lat < -M_PI){
+				lat = lat + M_PI;
+			}
+
+			while(lat > M_PI){
+				lat = lat - M_PI;
+			}
+		}/*}}}*/
+		inline double fixLon(){/*{{{*/
+			while(lon < 0.0){
+				lon = lon + 2.0*M_PI;
+			}
+
+			while(lon > 2.0*M_PI){
+				lon = lon - 2.0*M_PI;
+			}
+		}/*}}}*/
+		void convertToLatLon(){/*{{{*/
+			double temp;
+
+			temp = getLat();
+			temp = getLon();
+		}/*}}}*/
+		void convertToCart(){/*{{{*/
+			x = cos(lon) * cos(lat);
+			y = sin(lon) * cos(lat);
+			z = sin(lat);
+		}/*}}}*/
+		double magnitude2() const {/*{{{*/
+			return x*x + y*y + z*z;
+		}/*}}}*/
 };/*}}}*/
 class tri {/*{{{*/
 	private:
@@ -273,6 +488,145 @@ class tri {/*{{{*/
 			return hash;
 		}
 	};/*}}}*/
+};/*}}}*/
+class bdry_line {/*{{{*/
+	public:
+		std::pair<bdry_pnt, bdry_pnt> end_pts;
+		int idx;
+		bool SCproj;
+
+		double distanceToPoint(const pnt &Q){/*{{{*/
+			pnt A, B;
+			pnt C, T;
+			pnt Q_p, P;
+			double r;
+
+			A = pnt(end_pts.first.x, end_pts.first.y, end_pts.first.z);
+			B = pnt(end_pts.second.x, end_pts.second.y, end_pts.second.z);
+
+			if(SCproj){
+
+				C = pnt(0, 0, A.z);
+				T = A-C;
+				r = T.magnitude();
+
+				T = C;
+
+				Q_p = Q - (Q.dot(C))*C - T;
+				P = Q_p;
+
+				P.normalize();
+				P = P*r + T;
+
+				return Q.dotForAngle(P);
+			} else {
+				C = A.cross(B);
+
+				return (M_PI/2.0) - C.dotForAngle(Q);
+			}
+		}/*}}}*/
+		pnt projectedPoint(const pnt &Q){/*{{{*/
+			pnt A, B;
+			pnt C, T;
+			pnt Q_p, P;
+			double r;
+
+			A = pnt(end_pts.first.x, end_pts.first.y, end_pts.first.z);
+			B = pnt(end_pts.second.x, end_pts.second.y, end_pts.second.z);
+
+			if(SCproj){
+				C = pnt(0, 0, A.z);
+				T = A-C;
+				r = T.magnitude();
+				C.normalize();
+
+				T = C;
+			} else {
+				C = A.cross(B);
+				C.normalize();
+				T = pnt(0, 0, 0);
+				r = 1.0;
+			}
+
+			Q_p = Q - (Q.dot(C))*C - T;
+			P = Q_p;
+
+			P.normalize();
+			P = P*r + T;
+
+			return P;
+		}/*}}}*/
+		bool triangleOnBoundary(const pnt &a, const pnt &b, const pnt &c){/*{{{*/
+			pnt begin, end;
+			pnt a_vec, b_vec, c_vec, l_vec;
+			double a_sign, b_sign, c_sign;
+
+/*			begin = pnt(end_pts.first.x, end_pts.first.y, end_pts.first.z);
+			end = pnt(end_pts.second.x, end_pts.second.y, end_pts.second.z);
+
+			l_vec = end-begin;
+			a_vec = a-begin;
+			b_vec = b-begin;
+			c_vec = c-begin;
+
+			a_vec = a_vec.cross(l_vec);
+			b_vec = b_vec.cross(l_vec);
+			c_vec = c_vec.cross(l_vec);
+
+			a_sign = a_vec.dot(begin);
+			b_sign = b_vec.dot(begin);
+			c_sign = c_vec.dot(begin);
+
+			a_sign = a_sign/fabs(a_sign);
+			b_sign = b_sign/fabs(b_sign);
+			c_sign = c_sign/fabs(c_sign);
+
+			if(a_sign == b_sign == c_sign){
+				return false;
+			} else {
+				return true;
+			}*/
+
+			pnt proj_a, proj_b, proj_c;
+			double a_dist_begin, b_dist_begin, c_dist_begin;
+			double a_dist_end, b_dist_end, c_dist_end;
+			double ref_dist;
+			bool overlapping;
+
+			begin = pnt(end_pts.first.x, end_pts.first.y, end_pts.first.z);
+			end = pnt(end_pts.second.x, end_pts.second.y, end_pts.second.z);
+
+			begin.normalize();
+			end.normalize();
+
+			proj_a = projectedPoint(a);
+			proj_b = projectedPoint(b);
+			proj_c = projectedPoint(c);
+
+			a_dist_begin = proj_a.dotForAngle(begin);
+			b_dist_begin = proj_b.dotForAngle(begin);
+			c_dist_begin = proj_c.dotForAngle(begin);
+
+			a_dist_end = proj_a.dotForAngle(end);
+			b_dist_end = proj_b.dotForAngle(end);
+			c_dist_end = proj_c.dotForAngle(end);
+
+			ref_dist = begin.dotForAngle(end);
+
+			overlapping = (a_dist_begin <= ref_dist && a_dist_end <= ref_dist) &&
+						  (b_dist_begin <= ref_dist && b_dist_end <= ref_dist) &&
+						  (c_dist_begin <= ref_dist && c_dist_end <= ref_dist);
+
+			overlapping = overlapping && 
+				          (a_dist_begin >= 0 && a_dist_end >= 0) &&
+				          (b_dist_begin >= 0 && b_dist_end >= 0) &&
+				          (c_dist_begin >= 0 && c_dist_end >= 0);
+
+			return overlapping;
+
+
+
+		}/*}}}*/
 };/*}}}*/
 
 inline pnt operator*(const double d, const pnt &p){/*{{{*/

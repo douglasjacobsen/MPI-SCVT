@@ -3,7 +3,7 @@ How do you want the points created? (0 - Read from SaveVertices.dat, 1 - Monte C
 If you want them generated, how many points do you want?
 162
 How many iterations do you want to run for, if convergence isn't reached?
-5
+1
 How often, in iterations, do you want the point set written to a file? (Longer is better)
 0
 How many sub-triangle divisions would you like? (Minimum of 1, Causes every triangle to be divided into 4^n triangles)
