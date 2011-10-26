@@ -153,7 +153,7 @@ int id, num_procs;
 mpi::communicator world;
 
 // Message tags for sending and receiving non-blocking messages
-enum {msg_points, msg_ave, msg_tri_print , msg_max, msg_restart};
+enum {msg_points, msg_tri_print , msg_restart, msg_ave, msg_max, msg_l1};
 
 // Sort types
 enum {sort_dot, sort_vor};
@@ -236,7 +236,7 @@ void quadrature19P(const pnt &A, const pnt &B, const pnt &C, pnt &top, double &b
 void sortPoints(int sort_type, vector<region> &region_vec);
 void triangulateRegions(vector<region> &region_vec);
 void integrateRegions(vector<region> &region_vec);
-void computeMetrics(double &ave, double &max);
+void computeMetrics(double &ave, double &max, double &l1);
 void clearRegions(vector<region> &region_vec);
 void makeFinalTriangulations(vector<region> &region_vec);
 /*}}}*/
@@ -261,8 +261,9 @@ int main(int argc, char **argv){
 	int stop;
 	mpi::request *ave_comms;
 	mpi::request *max_comms;
-	double *my_ave, *my_max;
-	double glob_ave, glob_max;
+	mpi::request *l1_comms;
+	double *my_ave, *my_max, *my_l1;
+	double glob_ave, glob_max, glob_l1;
 	optional ave_opti, max_opti;
 
 	flags = new char[flags_str.size()+1];
@@ -279,8 +280,10 @@ int main(int argc, char **argv){
 
 	my_ave = new double[num_procs];
 	my_max = new double[num_procs];
+	my_l1 = new double[num_procs];
 	ave_comms = new mpi::request[num_procs];
 	max_comms = new mpi::request[num_procs];
+	l1_comms = new mpi::request[num_procs];
 
 	// Read in parameters and regions. Setup initial point set
 	if(id == master){
@@ -361,9 +364,11 @@ int main(int argc, char **argv){
 		for(it = 0; it < max_it && !stop; it++){
 			glob_ave = 0.0;
 			glob_max = 0.0;
+			glob_l1 = 0.0;
 			for(i = 0; i < num_procs; i++){
 				my_ave[i] = 0.0;
 				my_max[i] = 0.0;
+				my_l1[i] = 0.0;
 			}
 			my_timers[1].start(); // Iteration Timer
 
@@ -388,17 +393,20 @@ int main(int argc, char **argv){
 
 			my_timers[4].start(); // Metrics Timer
 
-			computeMetrics(my_ave[id],my_max[id]);
+			computeMetrics(my_ave[id],my_max[id], my_l1[id]);
 
 			// Start non-blocking sends and receives of metrics
 			if(id == master){
 				for(i = 1; i < num_procs; i++){
 					ave_comms[i] = world.irecv(i,msg_ave,my_ave[i]);
 					max_comms[i] = world.irecv(i,msg_max,my_max[i]);
+					l1_comms[i] = world.irecv(i,msg_l1,my_l1[i]);
+
 				}
 			} else {
 				ave_comms[id] = world.isend(master,msg_ave,my_ave[id]);
 				max_comms[id] = world.isend(master,msg_max,my_max[id]);
+				l1_comms[id] = world.isend(master,msg_l1,my_l1[id]);
 			}
 
 			my_timers[4].stop();
@@ -412,6 +420,7 @@ int main(int argc, char **argv){
 			if(id == master){
 				glob_ave = my_ave[id];
 				glob_max = my_max[id];
+				glob_l1 = my_l1[id];
 				for(i = 1; i < num_procs; i++){
 					ave_opti = ave_comms[i].test();
 					max_opti = max_comms[i].test();
@@ -426,9 +435,11 @@ int main(int argc, char **argv){
 
 					glob_ave += my_ave[i];
 					glob_max = std::max(glob_max, my_max[i]);
+					glob_l1 += my_l1[i];
 				}
-				glob_ave = glob_ave/points.size();
-				cout << it << " " << glob_ave << " " << glob_max << endl;
+				glob_ave = sqrt(glob_ave)/points.size();
+				glob_l1 = glob_l1/points.size();
+				cout << it << " " << glob_ave << " " << glob_l1 << " " << glob_max << endl;
 
 				if(conv == 1 && glob_ave < eps){
 					cout << "Converged on average movement." << endl;
@@ -1870,13 +1881,14 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 	#endif
 	return;
 }/*}}}*/
-void computeMetrics(double &ave, double &max){/*{{{*/
+void computeMetrics(double &ave, double &max, double &l1){/*{{{*/
 	//Metrics are computed for my updated points
 	pnt norm_pt;
 	double val;
 
 	max = 0.0;
 	ave = 0.0;
+	l1 = 0.0;
 #ifdef _DEBUG
 	cerr << "Computing local metrics " << id << endl;
 #endif
@@ -1885,8 +1897,9 @@ void computeMetrics(double &ave, double &max){/*{{{*/
 		norm_pt = points.at((*point_itr).idx) - (*point_itr);
 		val = norm_pt.magnitude();
 
-		ave += val;
+		ave += val*val;
 		max = std::max(val,max);
+		l1 += val;
 	}
 #ifdef _DEBUG
 	cerr << "Done Computing local metrics " << id << endl;
