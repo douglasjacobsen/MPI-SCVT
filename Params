@@ -1,7 +1,7 @@
 How do you want the points created? (0 - Read from SaveVertices.dat, 1 - Monte Carlo, 2 - Generalized Spiral)
-1
+0
 If you want them generated, how many points do you want?
-162
+42
 How many iterations do you want to run for, if convergence isn't reached?
 1
 How often, in iterations, do you want the point set written to a file? (Longer is better)
