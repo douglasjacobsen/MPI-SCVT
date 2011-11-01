@@ -82,6 +82,7 @@ class region{/*{{{*/
 				ar & neighbors;
 				ar & neighbors1;
 				ar & neighbors2;
+				ar & boundary_points;
 			}
 
 	public:
@@ -93,6 +94,7 @@ class region{/*{{{*/
 		vector<int> neighbors; // First Level of Neighbors
 		vector<int> neighbors1; // First Level of Neighbors + Self
 		vector<int> neighbors2; // Second Level of Neighbors + First Level of Neighbors + Self
+		vector<pnt> boundary_points;
 };/*}}}*/
 
 struct int_hasher {/*{{{*/
@@ -161,6 +163,7 @@ enum {sort_dot, sort_vor};
 // Global constants
 int points_begin = 0;
 int num_pts = 162;
+int num_bdry = 0;
 int max_it = 100;
 int div_levs = 1;
 int num_bisections = 0;
@@ -196,8 +199,6 @@ vector<pnt>::iterator point_itr;
 
 vector<pnt> boundary_points;
 vector<pnt>::iterator boundary_itr;
-vector<int> proj_point;
-vector<int> prev_proj;
 
 //Each processor has a list of all regions, as well as it's own regions (only one per processor currently)
 vector<region> my_regions;
@@ -242,14 +243,14 @@ void quadrature19P(const pnt &A, const pnt &B, const pnt &C, pnt &top, double &b
 /*}}}*/
 /* ***** Generic Region Routines *****{{{ */
 void sortPoints(int sort_type, vector<region> &region_vec);
+void sortBoundaryPoints(int sort_type, vector<region> &region_vec);
 void triangulateRegions(vector<region> &region_vec);
 void integrateRegions(vector<region> &region_vec);
 void computeMetrics(double &ave, double &max, double &l1);
 void computeEdgeNorms(double &ave, double &max, double &l1);
-void computeDistNorms(double &ave, double &max, double &l1);
 void clearRegions(vector<region> &region_vec);
 void makeFinalTriangulations(vector<region> &region_vec);
-void buildProjectArray(vector<region> &region_vec);
+void projectToBoundary(vector<region> &region_vec);
 /*}}}*/
 /* ***** Specific Region Routines ***** {{{ */
 void printAllFinalTriangulation();
@@ -260,7 +261,6 @@ void storeMyFinalTriangulation();
 void transferUpdatedPoints();
 void gatherAllUpdatedPoints();
 /*}}}*/
-
 /* ***** Routines for Points *****{{{*/
 void writePointsAsRestart(int it);
 double density(const pnt &p);
@@ -275,10 +275,8 @@ int main(int argc, char **argv){
 	mpi::request *ave_dist_comms, *max_dist_comms, *l1_dist_comms;
 	double *my_ave, *my_max, *my_l1;
 	double *my_edge_ave, *my_edge_max, *my_edge_l1;
-	double *my_dist_ave, *my_dist_max, *my_dist_l1;
 	double glob_ave, glob_max, glob_l1;
 	double edge_ave, edge_max, edge_l1;
-	double dist_ave, dist_max, dist_l1;
 	optional ave_opti, max_opti, l1_opti;
 	pnt p;
 
@@ -302,9 +300,6 @@ int main(int argc, char **argv){
 	my_edge_ave = new double[num_procs];
 	my_edge_max = new double[num_procs];
 	my_edge_l1 = new double[num_procs];
-	my_dist_ave = new double[num_procs];
-	my_dist_max = new double[num_procs];
-	my_dist_l1 = new double[num_procs];
 
 	ave_comms = new mpi::request[num_procs];
 	max_comms = new mpi::request[num_procs];
@@ -312,9 +307,6 @@ int main(int argc, char **argv){
 	ave_edge_comms = new mpi::request[num_procs];
 	max_edge_comms = new mpi::request[num_procs];
 	l1_edge_comms = new mpi::request[num_procs];
-	ave_dist_comms = new mpi::request[num_procs];
-	max_dist_comms = new mpi::request[num_procs];
-	l1_dist_comms = new mpi::request[num_procs];
 
 	// Read in parameters and regions. Setup initial point set
 	if(id == master){
@@ -357,6 +349,7 @@ int main(int argc, char **argv){
 	mpi::broadcast(world,quad_rule,master);
 	mpi::broadcast(world,regions,master);
 	mpi::broadcast(world,points,master);
+	mpi::broadcast(world,boundary_points,master);
 
 	//printRegions();
 
@@ -364,7 +357,6 @@ int main(int argc, char **argv){
 	for(i = 0; i < num_timers; i++){
 		my_timers[i] = mpi_timer(names[i]);
 	}
-
 
 	// Each processor clears my_regions (to make sure it's empty) and add it's own region into it's list.
 	// If there is only 1 processor, that processor takes all regions, which is a serial computation.
@@ -381,6 +373,8 @@ int main(int argc, char **argv){
 			my_regions.push_back((*region_itr));
 		}
 	}
+
+	sortBoundaryPoints(sort_method, my_regions);
 
 	// Loop over bisections
 	for(bisection = 0; bisection <= num_bisections; bisection++){
@@ -419,22 +413,17 @@ int main(int argc, char **argv){
 
 			my_timers[2].stop();
 
-//			if(do_proj){
-//			if(it%10 == 0){
-				buildProjectArray(my_regions);
-				do_proj = 0;
-//			}
-
 			my_timers[3].start(); // Integration Timer
 
 			integrateRegions(my_regions);
 
 			my_timers[3].stop();
 
+			projectToBoundary(my_regions);
+
 			my_timers[4].start(); // Metrics Timer
 
 			computeMetrics(my_ave[id],my_max[id], my_l1[id]);
-			computeDistNorms(my_dist_ave[id], my_dist_max[id], my_dist_l1[id]);
 			computeEdgeNorms(my_edge_ave[id], my_edge_max[id], my_edge_l1[id]);
 
 			// Start non-blocking sends and receives of metrics
@@ -447,10 +436,6 @@ int main(int argc, char **argv){
 					ave_edge_comms[i] = world.irecv(i,msg_ave,my_edge_ave[i]);
 					max_edge_comms[i] = world.irecv(i,msg_max,my_edge_max[i]);
 					l1_edge_comms[i] = world.irecv(i,msg_l1,my_edge_l1[i]);
-
-					ave_dist_comms[i] = world.irecv(i,msg_ave,my_dist_ave[i]);
-					max_dist_comms[i] = world.irecv(i,msg_max,my_dist_max[i]);
-					l1_dist_comms[i] = world.irecv(i,msg_l1,my_dist_l1[i]);
 				}
 			} else {
 				ave_comms[id] = world.isend(master,msg_ave,my_ave[id]);
@@ -460,10 +445,6 @@ int main(int argc, char **argv){
 				ave_edge_comms[id] = world.isend(master,msg_ave,my_edge_ave[id]);
 				max_edge_comms[id] = world.isend(master,msg_max,my_edge_max[id]);
 				l1_edge_comms[id] = world.isend(master,msg_l1,my_edge_l1[id]);
-
-				ave_dist_comms[id] = world.isend(master,msg_ave,my_dist_ave[id]);
-				max_dist_comms[id] = world.isend(master,msg_max,my_dist_max[id]);
-				l1_dist_comms[id] = world.isend(master,msg_l1,my_dist_l1[id]);
 			}
 
 			my_timers[4].stop();
@@ -482,10 +463,6 @@ int main(int argc, char **argv){
 				edge_ave = my_edge_ave[id];
 				edge_max = my_edge_max[id];
 				edge_l1 = my_edge_l1[id];
-
-				dist_ave = my_dist_ave[id];
-				dist_max = my_dist_max[id];
-				dist_l1 = my_dist_l1[id];
 				for(i = 1; i < num_procs; i++){
 					ave_opti = ave_comms[i].test();
 					max_opti = max_comms[i].test();
@@ -503,14 +480,6 @@ int main(int argc, char **argv){
 					if(!max_opti) max_edge_comms[i].wait();
 					if(!l1_opti) l1_edge_comms[i].wait();
 
-					ave_opti = ave_dist_comms[i].test();
-					max_opti = max_dist_comms[i].test();
-					l1_opti = l1_dist_comms[i].test();
-
-					if(!ave_opti) ave_dist_comms[i].wait();
-					if(!max_opti) max_dist_comms[i].wait();
-					if(!l1_opti) l1_dist_comms[i].wait();
-
 					glob_ave += my_ave[i];
 					glob_max = std::max(glob_max, my_max[i]);
 					glob_l1 += my_l1[i];
@@ -518,23 +487,14 @@ int main(int argc, char **argv){
 					edge_ave += my_edge_ave[i];
 					edge_max = std::max(edge_max, my_edge_max[i]);
 					edge_l1 += my_edge_l1[i];
-
-					dist_ave += my_dist_ave[i];
-					dist_max = std::max(dist_max, my_dist_max[i]);
-					dist_l1 += my_dist_l1[i];
 				}
 				glob_ave = sqrt(glob_ave)/points.size();
 				glob_l1 = glob_l1/points.size();
 
-				dist_ave = sqrt(dist_ave);
 				edge_ave = sqrt(edge_ave)/points.size();
 				edge_l1 = edge_l1/points.size();
 				cout << it << " " << glob_ave << " " << glob_l1 << " " << glob_max << endl;
-				cerr << it << " " << edge_ave << " " << edge_l1 << " " << edge_max << endl;
-				if(dist_ave > grid_space/log(it)){
-					do_proj = 1;
-					mpi::broadcast(world,do_proj,master);
-				}
+//				cerr << it << " " << edge_ave << " " << edge_l1 << " " << edge_max << endl;
 
 				if(conv == 1 && glob_ave < eps){
 					cout << "Converged on average movement." << endl;
@@ -596,8 +556,6 @@ int main(int argc, char **argv){
 	//Gather all updated points onto master processor, for printing to end_points.dat
 	global_timers[1].start(); // Global Gather Timer
 	gatherAllUpdatedPoints();
-
-
 	global_timers[1].stop();
 
 	// Compute final triangulation by merging all triangulations from each processor into an
@@ -606,7 +564,7 @@ int main(int argc, char **argv){
 	global_timers[2].start(); // Final Triangulation Timer
 	clearRegions(my_regions);
 	sortPoints(sort_dot, my_regions);
-	buildProjectArray(my_regions);
+/*	buildProjectArray(my_regions);
 	for(region_itr = my_regions.begin(); region_itr != my_regions.end(); region_itr++){
 		for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); point_itr++){
 			if(proj_point.at((*point_itr).idx) > -1){
@@ -621,7 +579,7 @@ int main(int argc, char **argv){
 				points.at((*point_itr).idx) = p;
 			}
 		}
-	}
+	}*/
 	triangulateRegions(my_regions);
 	makeFinalTriangulations(my_regions);
 	printMyFinalTriangulation();
@@ -730,6 +688,47 @@ void readParamsFile(){/*{{{*/
 	params.ignore(10000,'\n');
 
 	params.close();
+}/*}}}*/
+void readBoundaries(){/*{{{*/
+	int i, n_pts;
+	pnt p;
+	double dlat, dlon;
+	double lat, lon;
+	double lat_b, lon_b, lat_e, lon_e;
+	double dtr;
+
+	dtr = M_PI/180.0;
+
+	lat_b = -30.0;
+	lon_b = 0.0;
+
+	lat_e = 30.0;
+	lon_e = 0.0;
+
+	n_pts = 90;
+
+	dlat = (lat_e - lat_b)/n_pts;
+	dlon = (lon_e - lon_b)/n_pts;
+
+	for(i = 0; i < n_pts; i++){
+		lat = lat_b + dlat*i;
+		lon = lon_b + dlon*i;
+
+		p = pntFromLatLon(lat*dtr, lon*dtr);
+		p.idx = i;
+		p.isBdry = 0;
+
+		p.normalize();
+
+		boundary_points.push_back(p);
+	}
+
+	grid_space = (dlat + dlon)*dtr;
+
+	cout << "Made " << boundary_points.size() << " boundary points." << endl;
+
+	num_bdry = boundary_points.size();
+
 }/*}}}*/
 void buildRegions(){/*{{{*/
 	//Read in region centers, and connectivity (triangulation) from files
@@ -872,7 +871,6 @@ void buildRegions(){/*{{{*/
 	}
 
 	region_neighbors.clear();
-
 }/*}}}*/
 void printRegions(){/*{{{*/
 	// This function is only for debugging purposes.
@@ -900,45 +898,6 @@ void printRegions(){/*{{{*/
 
 	rp_out.close();
 	clearRegions(regions);
-}/*}}}*/
-void readBoundaries(){/*{{{*/
-	int i, n_pts;
-	pnt p;
-	double dlat, dlon;
-	double lat, lon;
-	double lat_b, lon_b, lat_e, lon_e;
-	double dtr;
-
-	dtr = M_PI/180.0;
-
-	lat_b = -45.0;
-	lon_b = 0.0;
-
-	lat_e = 45.0;
-	lon_e = 0.0;
-	
-	n_pts = 90;
-
-	dlat = (lat_e - lat_b)/n_pts;
-	dlon = (lon_e - lon_b)/n_pts;
-
-	for(i = 0; i < n_pts; i++){
-		lat = lat_b + dlat*i;
-		lon = lon_b + dlon*i;
-
-		p = pntFromLatLon(lat*dtr, lon*dtr);
-		p.idx = i;
-		p.isBdry = 0;
-
-		p.normalize();
-
-		boundary_points.push_back(p);
-	}
-
-	grid_space = (dlat + dlon)*dtr;
-
-	cout << "Made " << boundary_points.size() << " boundary points." << endl;
-
 }/*}}}*/
 /* }}} */
 /* ***** Bisect Edges Routines ***** {{{ */
@@ -1753,6 +1712,84 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 #endif
 	return;
 }/*}}}*/
+void sortBoundaryPoints(int sort_type, vector<region> &region_vec){/*{{{*/
+	//Sort points into my region(s).
+	//This is done using a dot product and checking if the dot product is inside of the region radius
+	double val;
+#ifdef _DEBUG
+	cerr << "Sorting Points " << id << endl;
+#endif
+	if(sort_type == sort_dot){
+		//Simple Dot Product Sort using the radius based decomposition.
+		for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
+			(*region_itr).radius = (*region_itr).input_radius;
+			for(point_itr = boundary_points.begin(); point_itr != boundary_points.end(); ++point_itr){
+				val = (*point_itr).dotForAngle((*region_itr).center);	
+
+				if(val < (*region_itr).radius){
+					(*region_itr).boundary_points.push_back((*point_itr));
+				} 
+			}
+		}
+	} else if (sort_type == sort_vor){
+		//More complicated sort, that sorts by Voronoi cells keeping current regions points, as well as neighboring regions points.
+		//Should handle variable resolution meshes better than the more simple dot product sorting.
+		double my_val;
+		int added;
+		double min_val;
+		double max_dist;
+		int min_region;
+		vector<int>::iterator cur_neigh_itr;
+
+		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
+			max_dist = 0.0;
+			for(point_itr = boundary_points.begin(); point_itr != boundary_points.end(); ++point_itr){
+				min_val = M_PI;
+				my_val = (*point_itr).dotForAngle((*region_itr).center);
+
+				if(my_val < (*region_itr).input_radius){
+					for(neighbor_itr = (*region_itr).neighbors2.begin(); 
+							neighbor_itr != (*region_itr).neighbors2.end(); ++neighbor_itr){
+
+						val = (*point_itr).dotForAngle(regions.at((*neighbor_itr)).center);
+
+						if(val < min_val){
+							min_region = (*neighbor_itr);
+							min_val = val;
+						}
+					}
+
+					added = 0;
+					for(neighbor_itr = (*region_itr).neighbors1.begin(); 
+							neighbor_itr != (*region_itr).neighbors1.end() && added == 0; 
+							++neighbor_itr){
+						if(min_region == (*neighbor_itr)){
+							val = (*region_itr).center.dotForAngle(regions[min_region].center);
+
+							if(min_region == (*region_itr).center.idx){
+								(*region_itr).boundary_points.push_back((*point_itr));
+							} else if(my_val < val) {
+								(*region_itr).boundary_points.push_back((*point_itr));
+							}
+
+							added = 1;
+						}
+					}
+
+					if(my_val > max_dist){
+						max_dist = my_val;
+					}
+				}
+
+				(*region_itr).radius = max_dist;
+			}
+		}
+	}
+#ifdef _DEBUG
+	cerr << "Done Sorting Points (Local) " << id << endl;
+#endif
+	return;
+}/*}}}*/
 void triangulateRegions(vector<region> &region_vec){/*{{{*/
 	//Triangulate my region(s) points
 	//Points are first stereographically projected into a plane tanget to region center
@@ -2022,21 +2059,15 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 	n_points.clear();
 	for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
 		if(bots[(*point_itr).idx] != 0.0){
-			if(proj_point.at((*point_itr).idx) > -1){
-				np = boundary_points.at(proj_point.at((*point_itr).idx));
-				np.idx = (*point_itr).idx;
-				np.isBdry = 0;
-				np.normalize();
-				n_points.push_back(np);
-			} else if(!(*point_itr).isBdry){
+			if(!(*point_itr).isBdry){
 				np = tops[(*point_itr).idx]/bots[(*point_itr).idx];
 				np.idx = (*point_itr).idx;
 				np.isBdry = (*point_itr).isBdry;
 				np.normalize();
 				n_points.push_back(np);
+			} else if((*point_itr).isBdry){
+				n_points.push_back((*point_itr));
 			}
-		} else if((*point_itr).isBdry){
-			n_points.push_back((*point_itr));
 		}
 	}
 
@@ -2074,36 +2105,6 @@ void computeMetrics(double &ave, double &max, double &l1){/*{{{*/
 #endif
 	return;
 }/*}}}*/
-void computeDistNorms(double &ave, double &max, double &l1){/*{{{*/
-	//Metrics are computed for my updated points
-	pnt a, b;
-	pnt norm_pt;
-	double val;
-
-	max = 0.0;
-	ave = 0.0;
-	l1 = 0.0;
-#ifdef _DEBUG
-	cerr << "Computing local distance metrics " << id << endl;
-#endif
-
-	for(point_itr = n_points.begin(); point_itr != n_points.end(); ++point_itr){
-		if(prev_proj.at((*point_itr).idx) > -1){
-			a = boundary_points.at(prev_proj.at((*point_itr).idx));
-			norm_pt = a - (*point_itr);
-			val = norm_pt.magnitude();
-			val = a.dotForDistance((*point_itr));
-
-			ave += val*val;
-			max = std::max(val,max);
-			l1 += val;
-		}
-	}
-#ifdef _DEBUG
-	cerr << "Done Computing local distance metrics " << id << endl;
-#endif
-	return;
-}/*}}}*/
 void computeEdgeNorms(double &ave, double &max, double &l1){/*{{{*/
 	//Metrics are computed for my updated points
 	pnt norm_pt;
@@ -2117,7 +2118,7 @@ void computeEdgeNorms(double &ave, double &max, double &l1){/*{{{*/
 #endif
 
 	for(point_itr = n_points.begin(); point_itr != n_points.end(); ++point_itr){
-		if(prev_proj.at((*point_itr).idx) == -1){
+		if((*point_itr).isBdry != -1){
 				norm_pt = points.at((*point_itr).idx) - (*point_itr);
 				val = norm_pt.magnitude();
 				val = points.at((*point_itr).idx).dotForAngle((*point_itr));
@@ -2125,6 +2126,8 @@ void computeEdgeNorms(double &ave, double &max, double &l1){/*{{{*/
 				ave += val*val;
 				max = std::max(val,max);
 				l1 += val;
+		} else {
+			(*point_itr).isBdry = 0;
 		}
 	}
 #ifdef _DEBUG
@@ -2137,17 +2140,12 @@ void clearRegions(vector<region> &region_vec){/*{{{*/
 #ifdef _DEBUG
 	cerr << "Clearing local regions " << id << endl;
 #endif
-	proj_point.clear();
 	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
 		(*region_itr).points.clear();
 		(*region_itr).triangles.clear();
 
 		assert((*region_itr).points.empty());
 		assert((*region_itr).triangles.empty());
-	}
-
-	for(int i = 0; i < points.size(); i++){
-		proj_point.push_back(-1);
 	}
 #ifdef _DEBUG
 	cerr << "Done Clearing local regions " << id << endl;
@@ -2284,25 +2282,28 @@ void makeFinalTriangulations(vector<region> &region_vec){/*{{{*/
 #endif
 	return;
 }/*}}}*/
-void buildProjectArray(vector<region> &region_vec){/*{{{*/
-	double min_dist, dist;	
+void projectToBoundary(vector<region> &region_vec){/*{{{*/
+	double min_dist, dist, alpha, beta;	
+	pnt p;
+	pnt a, b, c;
+	pnt v1, v2, v3;
 	vector<int> closest_cell;
-	int i;
+	vector<int> proj_1_point;
+	vector<int> proj_2_point;
+	int i, index1, index2;
 
-	proj_point.clear();
-	prev_proj.clear();
 	for(i = 0; i < boundary_points.size(); i++){
 		closest_cell.push_back(-1);
 	}
 	for(i = 0; i < points.size(); i++){
-		proj_point.push_back(-1);
-		prev_proj.push_back(-1);
+		proj_1_point.push_back(-1);
+		proj_2_point.push_back(-1);
 	}
 
-	for(boundary_itr = boundary_points.begin(); boundary_itr != boundary_points.end(); boundary_itr++){
-		min_dist = 5.0*M_PI;
-		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
-			for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); point_itr++){
+	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
+		for(boundary_itr = (*region_itr).boundary_points.begin(); boundary_itr != (*region_itr).boundary_points.end(); boundary_itr++){
+			min_dist = M_PI;
+			for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
 				dist = (*boundary_itr).dotForAngle((*point_itr));
 
 				if(dist < min_dist){
@@ -2314,8 +2315,8 @@ void buildProjectArray(vector<region> &region_vec){/*{{{*/
 	}
 
 	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
-		for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); point_itr++){
-			min_dist = 5.0*M_PI;
+		for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
+			min_dist = M_PI;
 
 			for(i = 0; i < closest_cell.size(); i++){
 				if(closest_cell.at(i) == (*point_itr).idx){
@@ -2323,11 +2324,73 @@ void buildProjectArray(vector<region> &region_vec){/*{{{*/
 
 					if(dist < min_dist){
 						min_dist = dist;
-						proj_point.at((*point_itr).idx) = i;
-						prev_proj.at((*point_itr).idx) = i;
+						proj_1_point.at((*point_itr).idx) = i;
 					}
 				}
 			}
+
+			/* -- FOR INERPOLATION --
+			if(proj_1_point.at((*point_itr).idx) > -1){
+				closest_cell.at(proj_1_point.at((*point_itr).idx)) = -1;
+			}
+
+			min_dist = M_PI;
+
+			for(i = 0; i < closest_cell.size(); i++){
+				if(closest_cell.at(i) == (*point_itr).idx){
+					dist = (*point_itr).dotForAngle(boundary_points.at(i));
+
+					if(dist < min_dist){
+						min_dist = dist;
+						proj_2_point.at((*point_itr).idx) = i;
+					}
+				}
+			}// */
+
+		}
+	}
+
+	for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
+		if(proj_1_point.at((*point_itr).idx) > -1){
+			index1 = proj_1_point.at((*point_itr).idx);
+//			index2 = proj_2_point.at((*point_itr).idx);
+			index2 = -1;
+			if(index2 > -1){
+				a = boundary_points.at(index1);
+				b = boundary_points.at(index2);
+
+				v1 = (*point_itr) - a;
+				v2 = b - a;
+
+				alpha = v2.magnitude();
+				alpha = alpha*alpha;
+				alpha = -v1.dot(v2)/alpha;
+
+				if(alpha >= 0.0 && alpha <= 1.0){
+					p = a + alpha * (b - a);
+
+					p.idx = (*point_itr).idx;
+					p.isBdry = 0;
+					p.normalize();
+				} else {
+					p = boundary_points.at(index1);
+					p.idx = (*point_itr).idx;
+					p.isBdry = 0;
+					p.normalize();
+
+				}
+			} else {
+				p = boundary_points.at(index1);
+				p.idx = (*point_itr).idx;
+				p.isBdry = -1;
+				p.normalize();
+			}
+
+			(*point_itr).x = p.x;
+			(*point_itr).y = p.y;
+			(*point_itr).z = p.z;
+			(*point_itr).idx = p.idx;
+			(*point_itr).isBdry = p.isBdry;
 		}
 	}
 
