@@ -251,6 +251,7 @@ void computeEdgeNorms(double &ave, double &max, double &l1);
 void clearRegions(vector<region> &region_vec);
 void makeFinalTriangulations(vector<region> &region_vec);
 void projectToBoundary(vector<region> &region_vec);
+void projectToBoundary2();
 /*}}}*/
 /* ***** Specific Region Routines ***** {{{ */
 void printAllFinalTriangulation();
@@ -264,6 +265,7 @@ void gatherAllUpdatedPoints();
 /* ***** Routines for Points *****{{{*/
 void writePointsAsRestart(int it);
 double density(const pnt &p);
+double ellipse_density(const pnt &p, double lat_c, double lon_c, double lat_width, double lon_width);
 /*}}}*/
 
 int main(int argc, char **argv){
@@ -419,7 +421,7 @@ int main(int argc, char **argv){
 
 			my_timers[3].stop();
 
-			projectToBoundary(my_regions);
+//			projectToBoundary(my_regions);
 
 			my_timers[4].start(); // Metrics Timer
 
@@ -556,6 +558,7 @@ int main(int argc, char **argv){
 	//Gather all updated points onto master processor, for printing to end_points.dat
 	global_timers[1].start(); // Global Gather Timer
 	gatherAllUpdatedPoints();
+	projectToBoundary2();
 	global_timers[1].stop();
 
 	// Compute final triangulation by merging all triangulations from each processor into an
@@ -690,19 +693,21 @@ void readParamsFile(){/*{{{*/
 	params.close();
 }/*}}}*/
 void readBoundaries(){/*{{{*/
-	int i, n_pts;
+	int i, j, n_pts;
 	pnt p;
 	double dlat, dlon;
 	double lat, lon;
 	double lat_b, lon_b, lat_e, lon_e;
 	double dtr;
+	
+	j = 0;
 
 	dtr = M_PI/180.0;
 
-	lat_b = -30.0;
+	lat_b = 15.0;
 	lon_b = 0.0;
 
-	lat_e = 30.0;
+	lat_e = 65.0;
 	lon_e = 0.0;
 
 	n_pts = 90;
@@ -715,13 +720,90 @@ void readBoundaries(){/*{{{*/
 		lon = lon_b + dlon*i;
 
 		p = pntFromLatLon(lat*dtr, lon*dtr);
-		p.idx = i;
+		p.idx = j;
 		p.isBdry = 0;
 
 		p.normalize();
 
 		boundary_points.push_back(p);
+		j++;
 	}
+
+	lat_b = 65.0;
+	lon_b = 0.0;
+
+	lat_e = 65.0;
+	lon_e = 40.0;
+
+	n_pts = 90;
+
+	dlat = (lat_e - lat_b)/n_pts;
+	dlon = (lon_e - lon_b)/n_pts;
+
+	for(i = 0; i < n_pts; i++){
+		lat = lat_b + dlat*i;
+		lon = lon_b + dlon*i;
+
+		p = pntFromLatLon(lat*dtr, lon*dtr);
+		p.idx = j;
+		p.isBdry = 0;
+
+		p.normalize();
+
+		boundary_points.push_back(p);
+		j++;
+	}
+
+	lat_b = 65.0;
+	lon_b = 40.0;
+
+	lat_e = 15.0;
+	lon_e = 40.0;
+
+	n_pts = 90;
+
+	dlat = (lat_e - lat_b)/n_pts;
+	dlon = (lon_e - lon_b)/n_pts;
+
+	for(i = 0; i < n_pts; i++){
+		lat = lat_b + dlat*i;
+		lon = lon_b + dlon*i;
+
+		p = pntFromLatLon(lat*dtr, lon*dtr);
+		p.idx = j;
+		p.isBdry = 0;
+
+		p.normalize();
+
+		boundary_points.push_back(p);
+		j++;
+	}
+
+	lat_b = 15.0;
+	lon_b = 40.0;
+
+	lat_e = 15.0;
+	lon_e = 0.0;
+
+	n_pts = 90;
+
+	dlat = (lat_e - lat_b)/n_pts;
+	dlon = (lon_e - lon_b)/n_pts;
+
+	for(i = 0; i < n_pts; i++){
+		lat = lat_b + dlat*i;
+		lon = lon_b + dlon*i;
+
+		p = pntFromLatLon(lat*dtr, lon*dtr);
+		p.idx = j;
+		p.isBdry = 0;
+
+		p.normalize();
+
+		boundary_points.push_back(p);
+		j++;
+	}
+
 
 	grid_space = (dlat + dlon)*dtr;
 
@@ -841,6 +923,7 @@ void buildRegions(){/*{{{*/
 
 		(*region_itr).points.clear();
 		(*region_itr).triangles.clear();
+		(*region_itr).boundary_points.clear();
 	}
 
 	// Build first and second levels of neighbors, for use in more complicated sort method.
@@ -2314,7 +2397,7 @@ void projectToBoundary(vector<region> &region_vec){/*{{{*/
 		}
 	}
 
-	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
+//	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
 		for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
 			min_dist = M_PI;
 
@@ -2348,7 +2431,7 @@ void projectToBoundary(vector<region> &region_vec){/*{{{*/
 			}// */
 
 		}
-	}
+//	}
 
 	for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
 		if(proj_1_point.at((*point_itr).idx) > -1){
@@ -2392,6 +2475,123 @@ void projectToBoundary(vector<region> &region_vec){/*{{{*/
 			(*point_itr).idx = p.idx;
 			(*point_itr).isBdry = p.isBdry;
 		}
+	}
+
+}/*}}}*/
+void projectToBoundary2(){/*{{{*/
+	double min_dist, dist, alpha, beta;	
+	pnt p;
+	pnt a, b, c;
+	pnt v1, v2, v3;
+	vector<int> closest_cell;
+	vector<int> proj_1_point;
+	vector<int> proj_2_point;
+	int i, index1, index2;
+
+	for(i = 0; i < boundary_points.size(); i++){
+		closest_cell.push_back(-1);
+	}
+	for(i = 0; i < points.size(); i++){
+		proj_1_point.push_back(-1);
+		proj_2_point.push_back(-1);
+	}
+
+	for(boundary_itr = boundary_points.begin(); boundary_itr != boundary_points.end(); boundary_itr++){
+		min_dist = M_PI;
+		for(point_itr = points.begin(); point_itr != points.end(); point_itr++){
+			dist = (*boundary_itr).dotForAngle((*point_itr));
+
+			if(dist < min_dist){
+				min_dist = dist;
+				closest_cell.at((*boundary_itr).idx) = (*point_itr).idx;
+			}
+		}
+	}
+
+	for(point_itr = points.begin(); point_itr != points.end(); point_itr++){
+		min_dist = M_PI;
+
+		for(i = 0; i < closest_cell.size(); i++){
+			if(closest_cell.at(i) == (*point_itr).idx){
+				dist = (*point_itr).dotForAngle(boundary_points.at(i));
+
+				if(dist < min_dist){
+					min_dist = dist;
+					proj_1_point.at((*point_itr).idx) = i;
+				}
+			}
+		}
+
+		/* -- FOR INERPOLATION --
+		if(proj_1_point.at((*point_itr).idx) > -1){
+			closest_cell.at(proj_1_point.at((*point_itr).idx)) = -1;
+		}
+
+		min_dist = M_PI;
+
+		for(i = 0; i < closest_cell.size(); i++){
+			if(closest_cell.at(i) == (*point_itr).idx){
+				dist = (*point_itr).dotForAngle(boundary_points.at(i));
+
+				if(dist < min_dist){
+					min_dist = dist;
+					proj_2_point.at((*point_itr).idx) = i;
+				}
+			}
+		}// */
+
+	}
+
+	for(point_itr = points.begin(); point_itr != points.end(); point_itr++){
+		if(proj_1_point.at((*point_itr).idx) > -1){
+			index1 = proj_1_point.at((*point_itr).idx);
+//			index2 = proj_2_point.at((*point_itr).idx);
+			index2 = -1;
+			if(index2 > -1){
+				a = boundary_points.at(index1);
+				b = boundary_points.at(index2);
+
+				v1 = (*point_itr) - a;
+				v2 = b - a;
+
+				alpha = v2.magnitude();
+				alpha = alpha*alpha;
+				alpha = -v1.dot(v2)/alpha;
+
+				if(alpha >= 0.0 && alpha <= 1.0){
+					p = a + alpha * (b - a);
+
+					p.idx = (*point_itr).idx;
+					p.isBdry = 0;
+					p.normalize();
+				} else {
+					p = boundary_points.at(index1);
+					p.idx = (*point_itr).idx;
+					p.isBdry = 0;
+					p.normalize();
+
+				}
+			} else {
+				p = boundary_points.at(index1);
+				p.idx = (*point_itr).idx;
+				p.isBdry = -1;
+				p.normalize();
+			}
+
+			(*point_itr).x = p.x;
+			(*point_itr).y = p.y;
+			(*point_itr).z = p.z;
+			(*point_itr).idx = p.idx;
+			(*point_itr).isBdry = p.isBdry;
+		}
+	}
+
+	if(id == master){
+		ofstream bdry_flags("boundary_flags.dat");
+		for(i = 0; i < points.size(); i++){
+			bdry_flags << proj_1_point.at(i)+1 << endl;
+		}
+		bdry_flags.close();
 	}
 
 }/*}}}*/
@@ -2759,7 +2959,7 @@ void writePointsAsRestart(const int it){/*{{{*/
 }/*}}}*/
 double density(const pnt &p){/*{{{*/
 	//density returns the value of the density function at point p
-	return 1.0; // Uniform density
+//	return 1.0; // Uniform density
 
 	/* Density function for Shallow Water Test Case 5 
 	pnt cent;
@@ -2781,6 +2981,43 @@ double density(const pnt &p){/*{{{*/
 	r = cent.dotForAngle(p);
 
 	density = ((tanh((trans_cent-r)*(1.0/width))+1.0)/2.0)/norm + min_val;
+
+	return density;
+	// */
+	
+	// /* Ellipse density function.
+	
+	return ellipse_density(p, 40.0, 0.0, 1.0, 0.5);
+	// */
+
+}/*}}}*/
+double ellipse_density(const pnt &p, double lat_c, double lon_c, double lat_width, double lon_width){/*{{{*/
+	//density returns the value of the density function at point p
+	//	return 1.0; // Uniform density
+	//	/* Ellipse Density function
+	pnt work;
+	double r1, r2, r;
+	double dtr;
+	double width, trans_cent, min_val, norm, density;
+
+	dtr = M_PI/180.0;
+
+	work = pntFromLatLon(p.getLat(), lon_c*dtr);
+	r1 = work.dotForAngle(p);
+
+	work = pntFromLatLon(lat_c*dtr, p.getLon());
+	r2 = work.dotForAngle(p);
+
+	r1 = r1/lon_width;
+	r2 = r2/lat_width;
+	r = sqrt (r1*r1 + r2*r2);
+
+	width = 0.15;
+	trans_cent = 30.0 * dtr;
+	min_val = 1.0/12.0;
+	min_val = pow(min_val,4);
+	norm = 1.0/(1.0-min_val);
+	density = ((tanh((trans_cent-r)*(1.0/width))+1.0)/2)/norm + min_val;
 
 	return density;
 	// */
