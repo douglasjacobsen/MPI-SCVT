@@ -247,11 +247,10 @@ void sortBoundaryPoints(int sort_type, vector<region> &region_vec);
 void triangulateRegions(vector<region> &region_vec);
 void integrateRegions(vector<region> &region_vec);
 void computeMetrics(double &ave, double &max, double &l1);
-void computeEdgeNorms(double &ave, double &max, double &l1);
 void clearRegions(vector<region> &region_vec);
 void makeFinalTriangulations(vector<region> &region_vec);
 void projectToBoundary(vector<region> &region_vec);
-void projectToBoundary2();
+void projectToBoundary2(vector<region> &region_vec);
 /*}}}*/
 /* ***** Specific Region Routines ***** {{{ */
 void printAllFinalTriangulation();
@@ -273,12 +272,8 @@ int main(int argc, char **argv){
 	int it, i;
 	int stop, do_proj;
 	mpi::request *ave_comms, *max_comms, *l1_comms;
-	mpi::request *ave_edge_comms, *max_edge_comms, *l1_edge_comms;
-	mpi::request *ave_dist_comms, *max_dist_comms, *l1_dist_comms;
 	double *my_ave, *my_max, *my_l1;
-	double *my_edge_ave, *my_edge_max, *my_edge_l1;
 	double glob_ave, glob_max, glob_l1;
-	double edge_ave, edge_max, edge_l1;
 	optional ave_opti, max_opti, l1_opti;
 	pnt p;
 
@@ -299,16 +294,10 @@ int main(int argc, char **argv){
 	my_ave = new double[num_procs];
 	my_max = new double[num_procs];
 	my_l1 = new double[num_procs];
-	my_edge_ave = new double[num_procs];
-	my_edge_max = new double[num_procs];
-	my_edge_l1 = new double[num_procs];
 
 	ave_comms = new mpi::request[num_procs];
 	max_comms = new mpi::request[num_procs];
 	l1_comms = new mpi::request[num_procs];
-	ave_edge_comms = new mpi::request[num_procs];
-	max_edge_comms = new mpi::request[num_procs];
-	l1_edge_comms = new mpi::request[num_procs];
 
 	// Read in parameters and regions. Setup initial point set
 	if(id == master){
@@ -421,12 +410,11 @@ int main(int argc, char **argv){
 
 			my_timers[3].stop();
 
-//			projectToBoundary(my_regions);
+			projectToBoundary(my_regions);
 
 			my_timers[4].start(); // Metrics Timer
 
 			computeMetrics(my_ave[id],my_max[id], my_l1[id]);
-			computeEdgeNorms(my_edge_ave[id], my_edge_max[id], my_edge_l1[id]);
 
 			// Start non-blocking sends and receives of metrics
 			if(id == master){
@@ -434,19 +422,11 @@ int main(int argc, char **argv){
 					ave_comms[i] = world.irecv(i,msg_ave,my_ave[i]);
 					max_comms[i] = world.irecv(i,msg_max,my_max[i]);
 					l1_comms[i] = world.irecv(i,msg_l1,my_l1[i]);
-
-					ave_edge_comms[i] = world.irecv(i,msg_ave,my_edge_ave[i]);
-					max_edge_comms[i] = world.irecv(i,msg_max,my_edge_max[i]);
-					l1_edge_comms[i] = world.irecv(i,msg_l1,my_edge_l1[i]);
 				}
 			} else {
 				ave_comms[id] = world.isend(master,msg_ave,my_ave[id]);
 				max_comms[id] = world.isend(master,msg_max,my_max[id]);
 				l1_comms[id] = world.isend(master,msg_l1,my_l1[id]);
-
-				ave_edge_comms[id] = world.isend(master,msg_ave,my_edge_ave[id]);
-				max_edge_comms[id] = world.isend(master,msg_max,my_edge_max[id]);
-				l1_edge_comms[id] = world.isend(master,msg_l1,my_edge_l1[id]);
 			}
 
 			my_timers[4].stop();
@@ -462,9 +442,6 @@ int main(int argc, char **argv){
 				glob_max = my_max[id];
 				glob_l1 = my_l1[id];
 
-				edge_ave = my_edge_ave[id];
-				edge_max = my_edge_max[id];
-				edge_l1 = my_edge_l1[id];
 				for(i = 1; i < num_procs; i++){
 					ave_opti = ave_comms[i].test();
 					max_opti = max_comms[i].test();
@@ -474,29 +451,14 @@ int main(int argc, char **argv){
 					if(!max_opti) max_comms[i].wait();
 					if(!l1_opti) l1_comms[i].wait();
 
-					ave_opti = ave_edge_comms[i].test();
-					max_opti = max_edge_comms[i].test();
-					l1_opti = l1_edge_comms[i].test();
-
-					if(!ave_opti) ave_edge_comms[i].wait();
-					if(!max_opti) max_edge_comms[i].wait();
-					if(!l1_opti) l1_edge_comms[i].wait();
-
 					glob_ave += my_ave[i];
 					glob_max = std::max(glob_max, my_max[i]);
 					glob_l1 += my_l1[i];
-
-					edge_ave += my_edge_ave[i];
-					edge_max = std::max(edge_max, my_edge_max[i]);
-					edge_l1 += my_edge_l1[i];
 				}
 				glob_ave = sqrt(glob_ave)/points.size();
 				glob_l1 = glob_l1/points.size();
 
-				edge_ave = sqrt(edge_ave)/points.size();
-				edge_l1 = edge_l1/points.size();
 				cout << it << " " << glob_ave << " " << glob_l1 << " " << glob_max << endl;
-//				cerr << it << " " << edge_ave << " " << edge_l1 << " " << edge_max << endl;
 
 				if(conv == 1 && glob_ave < eps){
 					cout << "Converged on average movement." << endl;
@@ -558,7 +520,6 @@ int main(int argc, char **argv){
 	//Gather all updated points onto master processor, for printing to end_points.dat
 	global_timers[1].start(); // Global Gather Timer
 	gatherAllUpdatedPoints();
-	projectToBoundary2();
 	global_timers[1].stop();
 
 	// Compute final triangulation by merging all triangulations from each processor into an
@@ -567,22 +528,6 @@ int main(int argc, char **argv){
 	global_timers[2].start(); // Final Triangulation Timer
 	clearRegions(my_regions);
 	sortPoints(sort_dot, my_regions);
-/*	buildProjectArray(my_regions);
-	for(region_itr = my_regions.begin(); region_itr != my_regions.end(); region_itr++){
-		for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); point_itr++){
-			if(proj_point.at((*point_itr).idx) > -1){
-				p = boundary_points.at(proj_point.at((*point_itr).idx));
-				p.idx = (*point_itr).idx;
-				p.isBdry = (*point_itr).isBdry;
-				p.normalize();
-
-				(*point_itr).x = p.x;
-				(*point_itr).y = p.y;
-				(*point_itr).z = p.z;
-				points.at((*point_itr).idx) = p;
-			}
-		}
-	}*/
 	triangulateRegions(my_regions);
 	makeFinalTriangulations(my_regions);
 	printMyFinalTriangulation();
@@ -710,7 +655,7 @@ void readBoundaries(){/*{{{*/
 	lat_e = 65.0;
 	lon_e = 0.0;
 
-	n_pts = 90;
+	n_pts = 200;
 
 	dlat = (lat_e - lat_b)/n_pts;
 	dlon = (lon_e - lon_b)/n_pts;
@@ -735,7 +680,7 @@ void readBoundaries(){/*{{{*/
 	lat_e = 65.0;
 	lon_e = 40.0;
 
-	n_pts = 90;
+	n_pts = 200;
 
 	dlat = (lat_e - lat_b)/n_pts;
 	dlon = (lon_e - lon_b)/n_pts;
@@ -760,7 +705,7 @@ void readBoundaries(){/*{{{*/
 	lat_e = 15.0;
 	lon_e = 40.0;
 
-	n_pts = 90;
+	n_pts = 200;
 
 	dlat = (lat_e - lat_b)/n_pts;
 	dlon = (lon_e - lon_b)/n_pts;
@@ -785,7 +730,7 @@ void readBoundaries(){/*{{{*/
 	lat_e = 15.0;
 	lon_e = 0.0;
 
-	n_pts = 90;
+	n_pts = 200;
 
 	dlat = (lat_e - lat_b)/n_pts;
 	dlon = (lon_e - lon_b)/n_pts;
@@ -803,7 +748,6 @@ void readBoundaries(){/*{{{*/
 		boundary_points.push_back(p);
 		j++;
 	}
-
 
 	grid_space = (dlat + dlon)*dtr;
 
@@ -2149,6 +2093,10 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 				np.normalize();
 				n_points.push_back(np);
 			} else if((*point_itr).isBdry){
+				if((*point_itr).isBdry == 2){
+					(*point_itr).isBdry = 0;
+				}
+
 				n_points.push_back((*point_itr));
 			}
 		}
@@ -2182,36 +2130,6 @@ void computeMetrics(double &ave, double &max, double &l1){/*{{{*/
 		ave += val*val;
 		max = std::max(val,max);
 		l1 += val;
-	}
-#ifdef _DEBUG
-	cerr << "Done Computing local metrics " << id << endl;
-#endif
-	return;
-}/*}}}*/
-void computeEdgeNorms(double &ave, double &max, double &l1){/*{{{*/
-	//Metrics are computed for my updated points
-	pnt norm_pt;
-	double val;
-
-	max = 0.0;
-	ave = 0.0;
-	l1 = 0.0;
-#ifdef _DEBUG
-	cerr << "Computing local metrics " << id << endl;
-#endif
-
-	for(point_itr = n_points.begin(); point_itr != n_points.end(); ++point_itr){
-		if((*point_itr).isBdry != -1){
-				norm_pt = points.at((*point_itr).idx) - (*point_itr);
-				val = norm_pt.magnitude();
-				val = points.at((*point_itr).idx).dotForAngle((*point_itr));
-
-				ave += val*val;
-				max = std::max(val,max);
-				l1 += val;
-		} else {
-			(*point_itr).isBdry = 0;
-		}
 	}
 #ifdef _DEBUG
 	cerr << "Done Computing local metrics " << id << endl;
@@ -2366,13 +2284,14 @@ void makeFinalTriangulations(vector<region> &region_vec){/*{{{*/
 	return;
 }/*}}}*/
 void projectToBoundary(vector<region> &region_vec){/*{{{*/
-	double min_dist, dist, alpha, beta;	
-	pnt p;
+	double new_min_dist, min_dist, dist, alpha, beta;	
+	pnt p, p_n;
 	pnt a, b, c;
 	pnt v1, v2, v3;
 	vector<int> closest_cell;
 	vector<int> proj_1_point;
 	vector<int> proj_2_point;
+	vector<int> search_flags;
 	int i, index1, index2;
 
 	for(i = 0; i < boundary_points.size(); i++){
@@ -2381,10 +2300,29 @@ void projectToBoundary(vector<region> &region_vec){/*{{{*/
 	for(i = 0; i < points.size(); i++){
 		proj_1_point.push_back(-1);
 		proj_2_point.push_back(-1);
+		search_flags.push_back(1);
 	}
 
 	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
-		for(boundary_itr = (*region_itr).boundary_points.begin(); boundary_itr != (*region_itr).boundary_points.end(); boundary_itr++){
+		//for(boundary_itr = (*region_itr).boundary_points.begin(); boundary_itr != (*region_itr).boundary_points.end(); boundary_itr++){
+		for(boundary_itr = boundary_points.begin(); boundary_itr != boundary_points.end(); boundary_itr++){
+
+			min_dist = M_PI;
+			for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); point_itr++){
+				dist = (*boundary_itr).dotForAngle((*point_itr));
+
+				if(dist < min_dist){
+					min_dist = dist;
+					closest_cell.at((*boundary_itr).idx) = (*point_itr).idx;
+				}
+			}
+
+			for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
+				if(closest_cell.at((*boundary_itr).idx) == (*point_itr).idx){
+					closest_cell.at((*boundary_itr).idx) = -1;
+				}
+			}
+
 			min_dist = M_PI;
 			for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
 				dist = (*boundary_itr).dotForAngle((*point_itr));
@@ -2394,121 +2332,11 @@ void projectToBoundary(vector<region> &region_vec){/*{{{*/
 					closest_cell.at((*boundary_itr).idx) = (*point_itr).idx;
 				}
 			}
+
 		}
 	}
-
-//	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
-		for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
-			min_dist = M_PI;
-
-			for(i = 0; i < closest_cell.size(); i++){
-				if(closest_cell.at(i) == (*point_itr).idx){
-					dist = (*point_itr).dotForAngle(boundary_points.at(i));
-
-					if(dist < min_dist){
-						min_dist = dist;
-						proj_1_point.at((*point_itr).idx) = i;
-					}
-				}
-			}
-
-			/* -- FOR INERPOLATION --
-			if(proj_1_point.at((*point_itr).idx) > -1){
-				closest_cell.at(proj_1_point.at((*point_itr).idx)) = -1;
-			}
-
-			min_dist = M_PI;
-
-			for(i = 0; i < closest_cell.size(); i++){
-				if(closest_cell.at(i) == (*point_itr).idx){
-					dist = (*point_itr).dotForAngle(boundary_points.at(i));
-
-					if(dist < min_dist){
-						min_dist = dist;
-						proj_2_point.at((*point_itr).idx) = i;
-					}
-				}
-			}// */
-
-		}
-//	}
 
 	for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
-		if(proj_1_point.at((*point_itr).idx) > -1){
-			index1 = proj_1_point.at((*point_itr).idx);
-//			index2 = proj_2_point.at((*point_itr).idx);
-			index2 = -1;
-			if(index2 > -1){
-				a = boundary_points.at(index1);
-				b = boundary_points.at(index2);
-
-				v1 = (*point_itr) - a;
-				v2 = b - a;
-
-				alpha = v2.magnitude();
-				alpha = alpha*alpha;
-				alpha = -v1.dot(v2)/alpha;
-
-				if(alpha >= 0.0 && alpha <= 1.0){
-					p = a + alpha * (b - a);
-
-					p.idx = (*point_itr).idx;
-					p.isBdry = 0;
-					p.normalize();
-				} else {
-					p = boundary_points.at(index1);
-					p.idx = (*point_itr).idx;
-					p.isBdry = 0;
-					p.normalize();
-
-				}
-			} else {
-				p = boundary_points.at(index1);
-				p.idx = (*point_itr).idx;
-				p.isBdry = -1;
-				p.normalize();
-			}
-
-			(*point_itr).x = p.x;
-			(*point_itr).y = p.y;
-			(*point_itr).z = p.z;
-			(*point_itr).idx = p.idx;
-			(*point_itr).isBdry = p.isBdry;
-		}
-	}
-
-}/*}}}*/
-void projectToBoundary2(){/*{{{*/
-	double min_dist, dist, alpha, beta;	
-	pnt p;
-	pnt a, b, c;
-	pnt v1, v2, v3;
-	vector<int> closest_cell;
-	vector<int> proj_1_point;
-	vector<int> proj_2_point;
-	int i, index1, index2;
-
-	for(i = 0; i < boundary_points.size(); i++){
-		closest_cell.push_back(-1);
-	}
-	for(i = 0; i < points.size(); i++){
-		proj_1_point.push_back(-1);
-		proj_2_point.push_back(-1);
-	}
-
-	for(boundary_itr = boundary_points.begin(); boundary_itr != boundary_points.end(); boundary_itr++){
-		min_dist = M_PI;
-		for(point_itr = points.begin(); point_itr != points.end(); point_itr++){
-			dist = (*boundary_itr).dotForAngle((*point_itr));
-
-			if(dist < min_dist){
-				min_dist = dist;
-				closest_cell.at((*boundary_itr).idx) = (*point_itr).idx;
-			}
-		}
-	}
-
-	for(point_itr = points.begin(); point_itr != points.end(); point_itr++){
 		min_dist = M_PI;
 
 		for(i = 0; i < closest_cell.size(); i++){
@@ -2522,7 +2350,6 @@ void projectToBoundary2(){/*{{{*/
 			}
 		}
 
-		/* -- FOR INERPOLATION --
 		if(proj_1_point.at((*point_itr).idx) > -1){
 			closest_cell.at(proj_1_point.at((*point_itr).idx)) = -1;
 		}
@@ -2538,45 +2365,50 @@ void projectToBoundary2(){/*{{{*/
 					proj_2_point.at((*point_itr).idx) = i;
 				}
 			}
-		}// */
+		}
 
 	}
 
-	for(point_itr = points.begin(); point_itr != points.end(); point_itr++){
+	for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
 		if(proj_1_point.at((*point_itr).idx) > -1){
 			index1 = proj_1_point.at((*point_itr).idx);
-//			index2 = proj_2_point.at((*point_itr).idx);
-			index2 = -1;
+			index2 = proj_2_point.at((*point_itr).idx);
 			if(index2 > -1){
 				a = boundary_points.at(index1);
 				b = boundary_points.at(index2);
 
-				v1 = (*point_itr) - a;
+				v1 = a - (*point_itr);
 				v2 = b - a;
 
 				alpha = v2.magnitude();
 				alpha = alpha*alpha;
 				alpha = -v1.dot(v2)/alpha;
 
-				if(alpha >= 0.0 && alpha <= 1.0){
+				if(alpha < 0.0){
+					p = boundary_points.at(index1);
+					p.idx = (*point_itr).idx;
+					p.isBdry = 0;
+					p.normalize();
+				} else {
 					p = a + alpha * (b - a);
 
 					p.idx = (*point_itr).idx;
 					p.isBdry = 0;
 					p.normalize();
-				} else {
-					p = boundary_points.at(index1);
-					p.idx = (*point_itr).idx;
-					p.isBdry = 0;
-					p.normalize();
-
 				}
 			} else {
 				p = boundary_points.at(index1);
 				p.idx = (*point_itr).idx;
-				p.isBdry = -1;
+				p.isBdry = 0;
 				p.normalize();
 			}
+
+/*			alpha = 1.00;
+			p_n = alpha*p + (1.0 - alpha) * (*point_itr);
+			p_n.normalize();
+			p_n.idx = (*point_itr).idx;
+			p_n.isBdry = 0;*/
+
 
 			(*point_itr).x = p.x;
 			(*point_itr).y = p.y;
@@ -2584,14 +2416,6 @@ void projectToBoundary2(){/*{{{*/
 			(*point_itr).idx = p.idx;
 			(*point_itr).isBdry = p.isBdry;
 		}
-	}
-
-	if(id == master){
-		ofstream bdry_flags("boundary_flags.dat");
-		for(i = 0; i < points.size(); i++){
-			bdry_flags << proj_1_point.at(i)+1 << endl;
-		}
-		bdry_flags.close();
 	}
 
 }/*}}}*/
@@ -2799,6 +2623,7 @@ void transferUpdatedPoints(){/*{{{*/
 	vector<pnt> temp_points_in;
 	vector<pnt> temp_points_out;
 	optional options;
+	int i;
 
 #ifdef _DEBUG
 	cerr << "Transfering updated points " << id << endl;
@@ -2814,11 +2639,11 @@ void transferUpdatedPoints(){/*{{{*/
 		for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
 			mpi::request comms[(*region_itr).neighbors.size()];
 
-			for(int i = 0; i < (*region_itr).neighbors.size(); i++){
+			for(i = 0; i < (*region_itr).neighbors.size(); i++){
 				comms[i] = world.isend((*region_itr).neighbors.at(i), msg_points, temp_points_out);
 			}
 
-			for(int i = 0; i < (*region_itr).neighbors.size(); i++){
+			for(i = 0; i < (*region_itr).neighbors.size(); i++){
 				temp_points_in.clear();
 				world.recv((*region_itr).neighbors.at(i), msg_points, temp_points_in);
 
@@ -2959,7 +2784,7 @@ void writePointsAsRestart(const int it){/*{{{*/
 }/*}}}*/
 double density(const pnt &p){/*{{{*/
 	//density returns the value of the density function at point p
-//	return 1.0; // Uniform density
+	return 1.0; // Uniform density
 
 	/* Density function for Shallow Water Test Case 5 
 	pnt cent;
