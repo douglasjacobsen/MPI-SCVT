@@ -243,7 +243,7 @@ void quadrature19P(const pnt &A, const pnt &B, const pnt &C, pnt &top, double &b
 /*}}}*/
 /* ***** Generic Region Routines *****{{{ */
 void sortPoints(int sort_type, vector<region> &region_vec);
-void sortBoundaryPoints(int sort_type, vector<region> &region_vec);
+void sortBoundaryPoints(vector<region> &region_vec);
 void triangulateRegions(vector<region> &region_vec);
 void integrateRegions(vector<region> &region_vec);
 void computeMetrics(double &ave, double &max, double &l1);
@@ -365,7 +365,7 @@ int main(int argc, char **argv){
 		}
 	}
 
-	sortBoundaryPoints(sort_method, my_regions);
+	sortBoundaryPoints(my_regions);
 
 	// Loop over bisections
 	for(bisection = 0; bisection <= num_bisections; bisection++){
@@ -1739,81 +1739,35 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 #endif
 	return;
 }/*}}}*/
-void sortBoundaryPoints(int sort_type, vector<region> &region_vec){/*{{{*/
+void sortBoundaryPoints(vector<region> &region_vec){/*{{{*/
 	//Sort points into my region(s).
 	//This is done using a dot product and checking if the dot product is inside of the region radius
-	double val;
+	double val, min_val;
+	int index;
+	//vector<region>::iterator region_itr;
 #ifdef _DEBUG
-	cerr << "Sorting Points " << id << endl;
+	cerr << "Sorting Boundary Points " << id << endl;
 #endif
-	if(sort_type == sort_dot){
-		//Simple Dot Product Sort using the radius based decomposition.
-		for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
-			(*region_itr).radius = (*region_itr).input_radius;
-			for(point_itr = boundary_points.begin(); point_itr != boundary_points.end(); ++point_itr){
-				val = (*point_itr).dotForAngle((*region_itr).center);	
+	//simple dot product sort using the radius based decomposition.
+	for(point_itr = boundary_points.begin(); point_itr != boundary_points.end(); point_itr++){
+		min_val = M_PI;
+		for(region_itr = regions.begin(); region_itr != regions.end(); region_itr++){
+			val = (*point_itr).dotForAngle((*region_itr).center);
 
-				if(val < (*region_itr).radius){
-					(*region_itr).boundary_points.push_back((*point_itr));
-				} 
+			if(val < min_val){
+				min_val = val;
+				index = (*region_itr).center.idx;
 			}
 		}
-	} else if (sort_type == sort_vor){
-		//More complicated sort, that sorts by Voronoi cells keeping current regions points, as well as neighboring regions points.
-		//Should handle variable resolution meshes better than the more simple dot product sorting.
-		double my_val;
-		int added;
-		double min_val;
-		double max_dist;
-		int min_region;
-		vector<int>::iterator cur_neigh_itr;
 
-		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
-			max_dist = 0.0;
-			for(point_itr = boundary_points.begin(); point_itr != boundary_points.end(); ++point_itr){
-				min_val = M_PI;
-				my_val = (*point_itr).dotForAngle((*region_itr).center);
-
-				if(my_val < (*region_itr).input_radius){
-					for(neighbor_itr = (*region_itr).neighbors2.begin(); 
-							neighbor_itr != (*region_itr).neighbors2.end(); ++neighbor_itr){
-
-						val = (*point_itr).dotForAngle(regions.at((*neighbor_itr)).center);
-
-						if(val < min_val){
-							min_region = (*neighbor_itr);
-							min_val = val;
-						}
-					}
-
-					added = 0;
-					for(neighbor_itr = (*region_itr).neighbors1.begin(); 
-							neighbor_itr != (*region_itr).neighbors1.end() && added == 0; 
-							++neighbor_itr){
-						if(min_region == (*neighbor_itr)){
-							val = (*region_itr).center.dotForAngle(regions[min_region].center);
-
-							if(min_region == (*region_itr).center.idx){
-								(*region_itr).boundary_points.push_back((*point_itr));
-							} else if(my_val < val) {
-								(*region_itr).boundary_points.push_back((*point_itr));
-							}
-
-							added = 1;
-						}
-					}
-
-					if(my_val > max_dist){
-						max_dist = my_val;
-					}
-				}
-
-				(*region_itr).radius = max_dist;
+		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
+			if((*region_itr).center.idx == index){
+				(*region_itr).boundary_points.push_back((*point_itr));
 			}
 		}
 	}
 #ifdef _DEBUG
-	cerr << "Done Sorting Points (Local) " << id << endl;
+	cerr << "Done Sorting Boundary Points (Local) " << id << endl;
 #endif
 	return;
 }/*}}}*/
@@ -2304,24 +2258,7 @@ void projectToBoundary(vector<region> &region_vec){/*{{{*/
 	}
 
 	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
-		//for(boundary_itr = (*region_itr).boundary_points.begin(); boundary_itr != (*region_itr).boundary_points.end(); boundary_itr++){
-		for(boundary_itr = boundary_points.begin(); boundary_itr != boundary_points.end(); boundary_itr++){
-
-			min_dist = M_PI;
-			for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); point_itr++){
-				dist = (*boundary_itr).dotForAngle((*point_itr));
-
-				if(dist < min_dist){
-					min_dist = dist;
-					closest_cell.at((*boundary_itr).idx) = (*point_itr).idx;
-				}
-			}
-
-			for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
-				if(closest_cell.at((*boundary_itr).idx) == (*point_itr).idx){
-					closest_cell.at((*boundary_itr).idx) = -1;
-				}
-			}
+		for(boundary_itr = (*region_itr).boundary_points.begin(); boundary_itr != (*region_itr).boundary_points.end(); boundary_itr++){
 
 			min_dist = M_PI;
 			for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
