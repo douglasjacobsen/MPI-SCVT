@@ -172,6 +172,7 @@ int num_bisections = 0;
 int conv = 0;
 int restart = 0;
 int sort_method = sort_dot;
+double min_bdry_angle = 1.0;
 double eps = 1.0E-10;
 double proj_alpha;
 
@@ -592,7 +593,7 @@ void readParamsFile(){/*{{{*/
 		pout << "1000" << endl;
 		pout << "How many iterations do you want to run without projection onto the boundary?" << endl;
 		pout << "10000" << endl;
-		pout << "How many iterations do you want with a variable projection distance?" << endl;
+		pout << "How many iterations do you want with a variable projection distance? (Minimum of 1)" << endl;
 		pout << "0" << endl;
 		pout << "How often, in iterations, do you want the point set written to a file? (Longer is better)" << endl << 500 << endl;
 		pout << "How many sub-triangle divisions would you like? (Minimum of 1, Causes every triangle to be divided into 4^n triangles)" << endl;
@@ -608,6 +609,9 @@ void readParamsFile(){/*{{{*/
 		pout << "2" << endl;
 		pout << "What sorting method do you want to use? (0 - dot product, 1 - voronoi)" << endl;
 		pout << "0" << endl;
+		pout << "What distance do you want between boundary points? (Given in degrees)" << endl;
+		pout << "1.0" << endl;
+
 		pout.close();
 
 		exit(1);
@@ -650,124 +654,72 @@ void readParamsFile(){/*{{{*/
 	getline(params,junk);
 	params >> sort_method;
 	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> min_bdry_angle;
+	params.ignore(10000,'\n');
+
+	min_bdry_angle = min_bdry_angle * M_PI/180.0;
 
 	params.close();
 }/*}}}*/
 void readBoundaries(){/*{{{*/
 	int i, j, n_pts;
 	pnt p;
+	pnt p_b, p_e;
+	double dist;
 	double dlat, dlon;
 	double lat, lon;
 	double lat_b, lon_b, lat_e, lon_e;
 	double dtr;
+	ifstream bdry_in("SaveBoundaries");
 	
-	j = 0;
-
 	dtr = M_PI/180.0;
 
-	lat_b = 15.0;
-	lon_b = 0.0;
+	j = 0;
 
-	lat_e = 65.0;
-	lon_e = 0.0;
+	while(!bdry_in.eof()){
+		bdry_in >> lat_b >> lon_b;
+		bdry_in.ignore(10000,'\n');
 
-	n_pts = 200;
+		bdry_in >> lat_e >> lon_e;
+		bdry_in.ignore(10000,'\n');
 
-	dlat = (lat_e - lat_b)/n_pts;
-	dlon = (lon_e - lon_b)/n_pts;
+		if(bdry_in.good()){
+			lat_b = lat_b * dtr;
+			lon_b = lon_b * dtr;
+			lat_e = lat_e * dtr;
+			lon_e = lon_e * dtr;
 
-	for(i = 0; i < n_pts; i++){
-		lat = lat_b + dlat*i;
-		lon = lon_b + dlon*i;
+			p_b = pntFromLatLon(lat_b, lon_b);
+			p_e = pntFromLatLon(lat_e, lon_e);
 
-		p = pntFromLatLon(lat*dtr, lon*dtr);
-		p.idx = j;
-		p.isBdry = 0;
+			dist = p_b.dotForAngle(p_e);
+			n_pts = dist/min_bdry_angle;
 
-		p.normalize();
+			p = p_b;
 
-		boundary_points.push_back(p);
-		j++;
+			dlat = (lat_e - lat_b)/n_pts;
+			dlon = (lon_e - lon_b)/n_pts;
+
+			for(i = 0; i < n_pts; i++){
+				p = pntFromLatLon(lat_b + dlat*i, lon_b + dlon*i);
+
+				p.normalize();
+				p.idx = j;
+				p.isBdry = 0;
+
+				j++;
+				boundary_points.push_back(p);
+			}
+		}
 	}
 
-	lat_b = 65.0;
-	lon_b = 0.0;
+	bdry_in.close();
 
-	lat_e = 65.0;
-	lon_e = 40.0;
-
-	n_pts = 200;
-
-	dlat = (lat_e - lat_b)/n_pts;
-	dlon = (lon_e - lon_b)/n_pts;
-
-	for(i = 0; i < n_pts; i++){
-		lat = lat_b + dlat*i;
-		lon = lon_b + dlon*i;
-
-		p = pntFromLatLon(lat*dtr, lon*dtr);
-		p.idx = j;
-		p.isBdry = 0;
-
-		p.normalize();
-
-		boundary_points.push_back(p);
-		j++;
-	}
-
-	lat_b = 65.0;
-	lon_b = 40.0;
-
-	lat_e = 15.0;
-	lon_e = 40.0;
-
-	n_pts = 200;
-
-	dlat = (lat_e - lat_b)/n_pts;
-	dlon = (lon_e - lon_b)/n_pts;
-
-	for(i = 0; i < n_pts; i++){
-		lat = lat_b + dlat*i;
-		lon = lon_b + dlon*i;
-
-		p = pntFromLatLon(lat*dtr, lon*dtr);
-		p.idx = j;
-		p.isBdry = 0;
-
-		p.normalize();
-
-		boundary_points.push_back(p);
-		j++;
-	}
-
-	lat_b = 15.0;
-	lon_b = 40.0;
-
-	lat_e = 15.0;
-	lon_e = 0.0;
-
-	n_pts = 200;
-
-	dlat = (lat_e - lat_b)/n_pts;
-	dlon = (lon_e - lon_b)/n_pts;
-
-	for(i = 0; i < n_pts; i++){
-		lat = lat_b + dlat*i;
-		lon = lon_b + dlon*i;
-
-		p = pntFromLatLon(lat*dtr, lon*dtr);
-		p.idx = j;
-		p.isBdry = 0;
-
-		p.normalize();
-
-		boundary_points.push_back(p);
-		j++;
-	}
 
 	cout << "Made " << boundary_points.size() << " boundary points." << endl;
 
-	num_bdry = boundary_points.size();
+	num_bdry = boundary_points.size(); 
 
 }/*}}}*/
 void buildRegions(){/*{{{*/
@@ -912,6 +864,8 @@ void buildRegions(){/*{{{*/
 	}
 
 	region_neighbors.clear();
+
+
 }/*}}}*/
 void printRegions(){/*{{{*/
 	// This function is only for debugging purposes.

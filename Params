@@ -1,14 +1,14 @@
 How do you want the points created? (0 - Read from SaveVertices.dat, 1 - Monte Carlo, 2 - Generalized Spiral)
-0
+1
 If you want them generated, how many points do you want?
 42
 How many iterations do you want to run for, if convergence isn't reached?
-40000
+10000
 How often, in iterations, do you want the point set written to a file? (Longer is better)
 0
 How many iterations do you want to run without projection onto the boundary?
-40000
-How many iterations do you want with a variable projection distance?
+10000
+How many iterations do you want with a variable projection distance? (Minimum of 1)
 1
 How many sub-triangle divisions would you like? (Minimum of 1, Causes every triangle to be divided into 4^n triangles)
 1
@@ -22,3 +22,5 @@ What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint
 0
 What sorting method do you want to use? (0 - dot product, 1 - voronoi)
 1
+What distance do you want between boundary points? (Given in degrees)
+1.0
