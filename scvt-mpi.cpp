@@ -165,13 +165,15 @@ int points_begin = 0;
 int num_pts = 162;
 int num_bdry = 0;
 int max_it = 100;
+int max_it_no_proj = 100;
+int max_it_scale_alpha = 0;
 int div_levs = 1;
 int num_bisections = 0;
 int conv = 0;
 int restart = 0;
 int sort_method = sort_dot;
 double eps = 1.0E-10;
-double grid_space;
+double proj_alpha;
 
 
 //Define variable for quadrature rules
@@ -289,8 +291,6 @@ int main(int argc, char **argv){
 	id = world.rank();
 	num_procs = world.size();
 
-	grid_space = (90.0/500)*M_PI/180.0;
-
 	my_ave = new double[num_procs];
 	my_max = new double[num_procs];
 	my_l1 = new double[num_procs];
@@ -333,6 +333,8 @@ int main(int argc, char **argv){
 	mpi::broadcast(world,num_pts,master);
 	mpi::broadcast(world,max_it,master);
 	mpi::broadcast(world,restart,master);
+	mpi::broadcast(world,max_it_no_proj,master);
+	mpi::broadcast(world,max_it_scale_alpha,master);
 	mpi::broadcast(world,num_bisections,master);
 	mpi::broadcast(world,div_levs,master);
 	mpi::broadcast(world,conv,master);
@@ -380,6 +382,8 @@ int main(int argc, char **argv){
 		stop = 0;
 		do_proj = 1;
 		for(it = 0; it < max_it && !stop; it++){
+
+			proj_alpha = max(it-max_it_no_proj, 0)/max_it_scale_alpha;
 			glob_ave = 0.0;
 			glob_max = 0.0;
 			glob_l1 = 0.0;
@@ -410,7 +414,9 @@ int main(int argc, char **argv){
 
 			my_timers[3].stop();
 
-			projectToBoundary(my_regions);
+			if(it > max_it_no_proj){
+				projectToBoundary(my_regions);
+			}
 
 			my_timers[4].start(); // Metrics Timer
 
@@ -584,7 +590,11 @@ void readParamsFile(){/*{{{*/
 		pout << "162" << endl;
 		pout << "How many iterations do you want to run for, if convergence isn't reached?" << endl;
 		pout << "1000" << endl;
-		pout << "Hoe often, in iterations, do you want the point set written to a file? (Longer is better)" << endl << 500 << endl;
+		pout << "How many iterations do you want to run without projection onto the boundary?" << endl;
+		pout << "10000" << endl;
+		pout << "How many iterations do you want with a variable projection distance?" << endl;
+		pout << "0" << endl;
+		pout << "How often, in iterations, do you want the point set written to a file? (Longer is better)" << endl << 500 << endl;
 		pout << "How many sub-triangle divisions would you like? (Minimum of 1, Causes every triangle to be divided into 4^n triangles)" << endl;
 		pout << "1" << endl;
 		pout << "How many bisections do you want until your final point set? (Each bisection maps n -> 4*n-6)" << endl;
@@ -596,7 +606,7 @@ void readParamsFile(){/*{{{*/
 		pout << "1E-10" << endl;
 		pout << "What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point)" << endl;
 		pout << "2" << endl;
-		pout << "What sorting method do you want to use? (0 - dot product, 2 - voronoi)" << endl;
+		pout << "What sorting method do you want to use? (0 - dot product, 1 - voronoi)" << endl;
 		pout << "0" << endl;
 		pout.close();
 
@@ -614,6 +624,12 @@ void readParamsFile(){/*{{{*/
 	params.ignore(10000,'\n');
 	getline(params,junk);
 	params >> restart;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> max_it_no_proj;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> max_it_scale_alpha;
 	params.ignore(10000,'\n');
 	getline(params,junk);
 	params >> div_levs;
@@ -748,8 +764,6 @@ void readBoundaries(){/*{{{*/
 		boundary_points.push_back(p);
 		j++;
 	}
-
-	grid_space = (dlat + dlon)*dtr;
 
 	cout << "Made " << boundary_points.size() << " boundary points." << endl;
 
@@ -2340,18 +2354,18 @@ void projectToBoundary(vector<region> &region_vec){/*{{{*/
 				p.normalize();
 			}
 
-/*			alpha = 1.00;
+			alpha = std::min(1.0, proj_alpha);
 			p_n = alpha*p + (1.0 - alpha) * (*point_itr);
 			p_n.normalize();
 			p_n.idx = (*point_itr).idx;
-			p_n.isBdry = 0;*/
+			p_n.isBdry = 0;
 
 
-			(*point_itr).x = p.x;
-			(*point_itr).y = p.y;
-			(*point_itr).z = p.z;
-			(*point_itr).idx = p.idx;
-			(*point_itr).isBdry = p.isBdry;
+			(*point_itr).x = p_n.x;
+			(*point_itr).y = p_n.y;
+			(*point_itr).z = p_n.z;
+			(*point_itr).idx = p_n.idx;
+			(*point_itr).isBdry = p_n.isBdry;
 		}
 	}
 
