@@ -2260,7 +2260,6 @@ void transferUpdatedPoints(){/*{{{*/
 	vector<pnt> temp_points_in;
 	vector<pnt> temp_points_out;
 	optional options;
-	mpi::request *comms;
 
 #ifdef _DEBUG
 	cerr << "Transfering updated points " << id << endl;
@@ -2274,6 +2273,8 @@ void transferUpdatedPoints(){/*{{{*/
 		}
 
 		for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
+//			mpi::request comms[(*region_itr).neighbors.size()];
+			mpi::request *comms;
 			comms = new mpi::request[(*region_itr).neighbors.size()];
 
 			for(int i = 0; i < (*region_itr).neighbors.size(); i++){
@@ -2291,7 +2292,7 @@ void transferUpdatedPoints(){/*{{{*/
 			
 			mpi::wait_all(comms,comms+(*region_itr).neighbors.size());
 
-			delete(comms);
+//			delete(comms);
 		}
 	} else {
 		points.swap(n_points);
