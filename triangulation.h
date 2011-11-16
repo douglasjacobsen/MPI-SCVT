@@ -4,6 +4,17 @@
 #include <iomanip>
 #include <fstream>
 
+#ifndef isnan
+# define isnan(x) \
+	(sizeof (x) == sizeof (long double) ? isnan_ld (x) \
+	 : sizeof (x) == sizeof (double) ? isnan_d (x) \
+	 : isnan_f (x))
+static inline int isnan_f  (float       x) { return x != x; }
+static inline int isnan_d  (double      x) { return x != x; }
+static inline int isnan_ld (long double x) { return x != x; }
+#endif
+
+
 class pnt {/*{{{*/
 	private:
 		friend class boost::serialization::access;
