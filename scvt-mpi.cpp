@@ -2259,6 +2259,7 @@ void transferUpdatedPoints(){/*{{{*/
 	//This keeps communications minimal and only updates the points that need to be updated for each region.
 	vector<pnt> temp_points_in;
 	vector<pnt> temp_points_out;
+	vector<mpi::request> comms;
 	optional options;
 
 #ifdef _DEBUG
@@ -2273,9 +2274,7 @@ void transferUpdatedPoints(){/*{{{*/
 		}
 
 		for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
-//			mpi::request comms[(*region_itr).neighbors.size()];
-			mpi::request *comms;
-			comms = new mpi::request[(*region_itr).neighbors.size()];
+			comms.resize((*region_itr).neighbors.size());
 
 			for(int i = 0; i < (*region_itr).neighbors.size(); i++){
 				comms[i] = world.isend((*region_itr).neighbors.at(i), msg_points, temp_points_out);
@@ -2290,9 +2289,9 @@ void transferUpdatedPoints(){/*{{{*/
 				}
 			}
 			
-			mpi::wait_all(comms,comms+(*region_itr).neighbors.size());
+			mpi::wait_all(&comms[0],&(comms[(*region_itr).neighbors.size()]));
 
-//			delete(comms);
+			comms.clear();
 		}
 	} else {
 		points.swap(n_points);
