@@ -5,6 +5,19 @@ DFLAGS = -g -m64 -D_DEBUG
 EXE=MpiScvt.x
 TRISRC=Triangle/
 
+PLATFORM=_MACOS
+PLATFORM=_LINUX
+
+ifeq ($(PLATFORM),_LINUX)
+	FLAGS = -O3 -m64 -DLINUX
+	DFLAGS = -g -m64 -D_DEBUG -DLINUX
+endif
+
+ifeq ($(PLATFORM),_MACOS)
+	FLAGS = -O3 -m64
+	DFLAGS = -g -m64 -D_DEBUG
+endif
+
 TRILIBDEFS= -DTRILIBRARY
 
 all: trilibrary
