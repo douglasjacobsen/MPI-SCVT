@@ -4,6 +4,17 @@
 #include <iomanip>
 #include <fstream>
 
+#ifndef isnan
+# define isnan(x) \
+	(sizeof (x) == sizeof (long double) ? isnan_ld (x) \
+	 : sizeof (x) == sizeof (double) ? isnan_d (x) \
+	 : isnan_f (x))
+static inline int isnan_f  (float       x) { return x != x; }
+static inline int isnan_d  (double      x) { return x != x; }
+static inline int isnan_ld (long double x) { return x != x; }
+#endif
+
+
 class pnt {/*{{{*/
 	private:
 		friend class boost::serialization::access;
@@ -13,31 +24,31 @@ class pnt {/*{{{*/
 				ar & x;
 				ar & y;
 				ar & z;
-				ar & dens;
+				ar & projTo;
 				ar & isBdry;
 				ar & idx;
 			}
 	public:
 		double x, y, z;
-		double dens;
+		int projTo;
 		int isBdry;
 		int idx;
 
 
-		pnt(double x_, double y_, double z_, double dens_, int isBdry_, int idx_)
-			:  x(x_), y(y_), z(z_), dens(dens_), isBdry(isBdry_), idx(idx_) {	}
+		pnt(double x_, double y_, double z_, int isBdry_, int idx_, int projTo_)
+			:  x(x_), y(y_), z(z_), isBdry(isBdry_), idx(idx_), projTo(projTo_) {	}
 
 		pnt(double x_, double y_, double z_, int isBdry_, int idx_)
-			:  x(x_), y(y_), z(z_), dens(1.0), isBdry(isBdry_), idx(idx_) {	}
+			:  x(x_), y(y_), z(z_), isBdry(isBdry_), idx(idx_), projTo(-1) {	}
 
 		pnt(double x_, double y_, double z_)
-			: x(x_), y(y_), z(z_), dens(1.0), isBdry(0), idx(0) { }
+			: x(x_), y(y_), z(z_), isBdry(0), idx(0), projTo(-1) { }
 
 		pnt(double x_, double y_, double z_, int isBdry_)
-			: x(x_), y(y_), z(z_), dens(1.0), isBdry(isBdry_), idx(0) { }
+			: x(x_), y(y_), z(z_), isBdry(isBdry_), idx(0), projTo(-1) { }
 
 		pnt()
-			: x(0.0), y(0.0), z(0.0), dens(1.0), isBdry(0), idx(0) { }
+			: x(0.0), y(0.0), z(0.0), isBdry(0), idx(0), projTo(-1) { }
 
 		friend pnt operator*(const double d, const pnt &p);
 		friend std::ostream & operator<<(std::ostream &os, const pnt &p);
@@ -49,7 +60,7 @@ class pnt {/*{{{*/
 			z = p.z;
 			isBdry = p.isBdry;
 			idx = p.idx;
-			dens = p.dens;
+			projTo = -1;
 			return *this;
 		}/*}}}*/
 		bool operator==(const pnt &p) const {/*{{{*/
@@ -66,28 +77,24 @@ class pnt {/*{{{*/
 		}/*}}}*/
 		pnt operator+(const pnt &p) const {/*{{{*/
 			double x_, y_, z_;
-			double dens_;
 
 			x_ = x+p.x;
 			y_ = y+p.y;
 			z_ = z+p.z;
-			dens_ = dens+p.dens;
 
-			return pnt(x_,y_,z_,dens_,0,0);
+			return pnt(x_,y_,z_,0,0);
 		}/*}}}*/
 		pnt operator*(double d) const {/*{{{*/
 			double x_, y_, z_;
-			double dens_;
 
 			x_ = x*d;
 			y_ = y*d;
 			z_ = z*d;
-			dens_ = dens*d;
-			return pnt(x_,y_,z_,dens_,0,0);
+
+			return pnt(x_,y_,z_,0,0);
 		}/*}}}*/
 		pnt operator/(double d) const {/*{{{*/
 			double x_, y_, z_;
-			double dens_;
 
 			if(d == 0.0){
 				std::cout << "pnt: operator/" << std::endl;
@@ -98,8 +105,7 @@ class pnt {/*{{{*/
 			x_ = x/d;
 			y_ = y/d;
 			z_ = z/d;
-			dens_ = dens/d;
-			return pnt(x_,y_,z_,dens_,0,0);
+			return pnt(x_,y_,z_,0,0);
 		}/*}}}*/
 		pnt& operator/=(double d){/*{{{*/
 			if(d == 0.0){
@@ -109,14 +115,12 @@ class pnt {/*{{{*/
 			x = x/d;
 			y = y/d;
 			z = z/d;
-			dens = dens/d;
 			return *this;
 		}/*}}}*/
 		pnt& operator+=(const pnt &p){/*{{{*/
 			x += p.x;
 			y += p.y;
 			z += p.z;
-			dens += p.dens;
 			return *this;
 		}/*}}}*/
 		double operator[](int i) const {/*{{{*/
@@ -184,6 +188,20 @@ class pnt {/*{{{*/
 		}/*}}}*/
 		double magnitude2() const {/*{{{*/
 			return x*x + y*y + z*z;
+		}/*}}}*/
+		double getLat() const {/*{{{*/
+			return asin(z);			
+		}/*}}}*/
+		double getLon() const {/*{{{*/
+			double lon;
+
+			lon = atan2(y,x);
+
+			if(lon < 0){
+				return 2.0 * M_PI + lon;
+			} else {
+				return lon;
+			}
 		}/*}}}*/
 	struct hasher {/*{{{*/
 		size_t operator()(const pnt &p) const {
@@ -312,9 +330,7 @@ void circumcenter(const pnt &A,const pnt &B,const pnt &C, pnt &cent){/*{{{*/
 	abp = c*( a + b - c);
 
 	cent = (pbc*A + apc*B + abp*C)/(pbc + apc + abp);
-	cent.dens = (pbc*A.dens + apc*B.dens + abp*C.dens)/(pbc + apc + abp);
 
-//	cent.dens = (A.dens+B.dens+C.dens)/3.0;
 }/*}}}*/
 double circumradius(const pnt &A, const pnt &B, const pnt &C){/*{{{*/
 

@@ -505,10 +505,13 @@ int main(int argc, char **argv){
 
 	if(id == master){
 		ofstream end_pts("end_points.dat");
+		ofstream pt_dens("point_density.dat");
 		for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
 			end_pts << (*point_itr) << endl;
+			pt_dens << density((*point_itr)) << endl;
 		}
 		end_pts.close();
+		pt_dens.close();
 	}
 	global_timers[1].stop();
 
@@ -2257,6 +2260,7 @@ void transferUpdatedPoints(){/*{{{*/
 	vector<pnt> temp_points_in;
 	vector<pnt> temp_points_out;
 	optional options;
+	mpi::request *comms;
 
 #ifdef _DEBUG
 	cerr << "Transfering updated points " << id << endl;
@@ -2270,7 +2274,7 @@ void transferUpdatedPoints(){/*{{{*/
 		}
 
 		for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
-			mpi::request comms[(*region_itr).neighbors.size()];
+			comms = new mpi::request[(*region_itr).neighbors.size()];
 
 			for(int i = 0; i < (*region_itr).neighbors.size(); i++){
 				comms[i] = world.isend((*region_itr).neighbors.at(i), msg_points, temp_points_out);
@@ -2286,12 +2290,8 @@ void transferUpdatedPoints(){/*{{{*/
 			}
 			
 			mpi::wait_all(comms,comms+(*region_itr).neighbors.size());
-/*			for(int i = 0; i < (*region_itr).neighbors.size(); i++){
-				options = comms[i].test();
-				if(!options){
-					comms[i].wait();
-				}
-			}*/
+
+			delete(comms);
 		}
 	} else {
 		points.swap(n_points);
@@ -2427,12 +2427,11 @@ double density(const pnt &p){/*{{{*/
 	double min_val;
 	double width, trans_cent;
 
-	//cent = pnt(0.0, -0.866025403784439, 0.5);
-	cent = pnt(0.0, 0.866025403784439, -0.5);
+	cent = pnt(0.0, -0.866025403784439, 0.5);
 	cent.normalize();
 
 	width = 0.15;
-	min_val = 1.0/4.0;
+	min_val = 1.0/8.0;
 	min_val = pow(min_val,4);
 	trans_cent = 30.0*M_PI/180.0;
 	norm = 1.0/(1.0-min_val);

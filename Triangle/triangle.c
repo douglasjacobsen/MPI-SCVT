@@ -268,7 +268,7 @@
 /*   available as Section 6.6 of my dissertation).                           */
 
 /* #define CPU86 */
- #define LINUX // */
+// #define LINUX // */
 
 #define INEXACT /* Nothing */
 /* #define INEXACT volatile */
