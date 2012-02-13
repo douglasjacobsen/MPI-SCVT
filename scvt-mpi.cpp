@@ -12,11 +12,12 @@
 // 
 //  Modified:
 //
-//    03 December 2010
+//    02 February 2012
 //
 //  Author:
 //
 //   Doug Jacobsen
+//   Geoff Womeldorff
 //
 //**************************************************
 
@@ -33,6 +34,9 @@
 #include <math.h>
 #include <assert.h>
 
+#ifdef USE_NETCDF
+#include <netcdfcpp.h>
+#endif
 
 #include <boost/mpi.hpp>
 #include <boost/serialization/vector.hpp>
@@ -83,6 +87,8 @@ class region{/*{{{*/
 				ar & neighbors1;
 				ar & neighbors2;
 				ar & boundary_points;
+				ar & loop_start;
+				ar & loop_stop;
 			}
 
 	public:
@@ -95,6 +101,8 @@ class region{/*{{{*/
 		vector<int> neighbors1; // First Level of Neighbors + Self
 		vector<int> neighbors2; // Second Level of Neighbors + First Level of Neighbors + Self
 		vector<pnt> boundary_points;
+		vector<int> loop_start; // beginning point in loop
+		vector<int> loop_stop; // ending point in loop
 };/*}}}*/
 
 struct int_hasher {/*{{{*/
@@ -175,7 +183,13 @@ int sort_method = sort_dot;
 double min_bdry_angle = 1.0;
 double eps = 1.0E-10;
 double proj_alpha;
+double max_resolution = 4.0;
 
+//gw: restart mode type and variable (move to a header?)
+enum restart_mode_type { RESTART_OVERWRITE, RESTART_RETAIN };
+restart_mode_type restart_mode = RESTART_OVERWRITE;
+enum fileio_mode_type { FILEIO_TXT, FILEIO_NETCDF, FILEIO_BOTH };
+fileio_mode_type fileio_mode = FILEIO_TXT;
 
 //Define variable for quadrature rules
 int quad_rule = 2;
@@ -203,6 +217,9 @@ vector<pnt>::iterator point_itr;
 vector<pnt> boundary_points;
 vector<pnt>::iterator boundary_itr;
 
+vector<int> loop_start;
+vector<int> loop_stop;
+
 //Each processor has a list of all regions, as well as it's own regions (only one per processor currently)
 vector<region> my_regions;
 vector<region> regions;
@@ -223,6 +240,7 @@ void readParamsFile();
 void buildRegions();
 void printRegions();
 void readBoundaries();
+void readBoundariesV2();
 /*}}}*/
 /* ***** Bisect Edges Routines *****{{{*/
 void bisectEdges(int end);
@@ -265,7 +283,13 @@ void transferUpdatedPoints();
 void gatherAllUpdatedPoints();
 /*}}}*/
 /* ***** Routines for Points *****{{{*/
-void writePointsAsRestart(int it);
+void writePointsAsRestart(const int it, const restart_mode_type restart_mode, const fileio_mode_type fileio_mode);
+#ifdef USE_NETCDF
+int writeRestartFileOverwriteNC( const int it, const vector<pnt> &points );
+int writeRestartFileRetainNC( const int it, const vector<pnt> &points );
+#endif
+int writeRestartFileOverwriteTXT( const int it );
+int writeRestartFileRetainTXT( const int it );
 double density(const pnt &p);
 double ellipse_density(const pnt &p, double lat_c, double lon_c, double lat_width, double lon_width);
 /*}}}*/
@@ -317,10 +341,11 @@ int main(int argc, char **argv){
 			cout << "Points being created with Generalized Spiral." << endl;
 			makeGeneralizedSpiralPoints(num_pts);
 		}
-		readBoundaries();
+		//readBoundaries();
+		readBoundariesV2();
 		buildRegions();
 
-		ofstream pts_out("point_restart_0.dat");
+		ofstream pts_out("point_initial.dat");
 		for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
 			pts_out << (*point_itr) << endl;
 		}
@@ -482,7 +507,7 @@ int main(int argc, char **argv){
 			
 			if(restart > 0 && it > 0){
 				if(it%restart == 0){
-					writePointsAsRestart(it);
+					writePointsAsRestart(it, restart_mode, fileio_mode);
 				}
 			}
 		}
@@ -579,6 +604,8 @@ void readParamsFile(){/*{{{*/
 	//If Params doesn't exist, write out Params with a default set of parameters
 	string junk;
 	ifstream params("Params");
+	int temp_restart_mode;
+	int temp_fileio_mode;
 
 	if(!params){
 		cout << "Error opening Params file." << endl;
@@ -609,8 +636,12 @@ void readParamsFile(){/*{{{*/
 		pout << "2" << endl;
 		pout << "What sorting method do you want to use? (0 - dot product, 1 - voronoi)" << endl;
 		pout << "0" << endl;
-		pout << "What distance do you want between boundary points? (Given in degrees)" << endl;
-		pout << "1.0" << endl;
+		pout << "What is the maximum allowable distance between boundary points? (Given in km)" << endl;
+		pout << "4.0" << endl;
+		pout << "Which format for restart files would you like? (0 - text, 1 - netcdf, 2 - both, 0 will be selected if netcdf is not linked)" << endl;
+		pout << "0" << endl;
+		pout << "Would you like one restart file, or a series? (0 - overwrite, 1 - retain, ignored if restart files are disabled above)" << endl;
+		pout << "0" << endl;
 
 		pout.close();
 
@@ -655,10 +686,44 @@ void readParamsFile(){/*{{{*/
 	params >> sort_method;
 	params.ignore(10000,'\n');
 	getline(params,junk);
-	params >> min_bdry_angle;
+// 	params >> min_bdry_angle;
+	params >> max_resolution;
 	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> temp_fileio_mode;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> temp_restart_mode;
+	params.ignore(10000,'\n');
+	
+	switch (temp_fileio_mode) {
+		case 0:
+			fileio_mode = FILEIO_TXT;
+			break;
+		case 1:
+			fileio_mode = FILEIO_NETCDF;
+			break;
+		case 2:
+			fileio_mode = FILEIO_BOTH;
+			break;
+		default:
+			cout << "Restart file format has incorrect value in params file. Should be one of {0,1,2}.";
+			exit(1);
+	}
 
-	min_bdry_angle = min_bdry_angle * M_PI/180.0;
+	switch (temp_restart_mode) {
+		case 0:
+			restart_mode = RESTART_OVERWRITE;
+			break;
+		case 1:
+			restart_mode = RESTART_RETAIN;
+			break;
+		default:
+			cout << "Restart mode (overwrite/retain) has incorrect value in params file. Should be one of {0,1}";
+			exit(1);
+	}
+
+// 	min_bdry_angle = min_bdry_angle * M_PI/180.0;
 
 	params.close();
 }/*}}}*/
@@ -718,6 +783,134 @@ void readBoundaries(){/*{{{*/
 
 
 	cout << "Made " << boundary_points.size() << " boundary points." << endl;
+
+	num_bdry = boundary_points.size(); 
+
+}/*}}}*/
+void readBoundariesV2(){/*{{{*/
+	int i, j, n_pts;
+	int count_count, bdry_count, fill_count, bdry_total;
+	int add_count;
+	int count_start, count_stop;
+	int cur_loop_start, cur_loop_length;
+	int p0_idx, p1_idx;
+	//pnt p;
+	//pnt p_b, p_e;
+	double bdry_lon, bdry_lat;
+	double dtr = M_PI/180.0;
+	double point_delta;
+	double add_spacing;
+	double denom;
+	double c0, c1;
+	double t, omega;
+	double r_earth = 6371.0; //avg radius in km
+// 	double max_resolution = 4.0; // max spacing between boundary points allowed in km
+	
+	// gw: read boundary points file
+// 	cout << "Boundary read begin." << endl;
+	bdry_count = 0;
+	ifstream bdry_in("SaveBoundaries");
+	while(!bdry_in.eof()){
+		bdry_in >> bdry_lon >> bdry_lat;
+		bdry_in.ignore(10000,'\n');
+	
+		if(bdry_in.good()){
+			
+			bdry_lon *= dtr;
+			bdry_lat *= dtr;
+			pnt p = pntFromLatLon(bdry_lat, bdry_lon);
+			
+			p.normalize();
+			p.idx = j;
+			p.isBdry = 0;
+			bdry_count++;
+			boundary_points.push_back(p);
+		} // end if input good
+			
+	} // end while not eof
+	bdry_in.close();
+// 	cout << "Boundary read end." << endl;
+	
+	// gw: read loop counts file
+// 	cout << "Count read begin." << endl;
+	count_count = 0;
+	ifstream count_in("SaveLoopCounts");
+	while(!count_in.eof()){
+		count_in >> count_start >> count_stop;
+		count_in.ignore(10000,'\n');
+		
+		if(count_in.good()){
+			loop_start.push_back(count_start);
+			loop_stop.push_back(count_stop);
+// 			cout << " count_count " << count_count << " count_start " << count_start;
+// 			cout << " count_stop " << count_stop << " loop_start.at(" << count_count;
+// 			cout << ") " << loop_start.at(count_count) << " loop_stop.at(" << count_count;
+// 			cout << ") " << loop_stop.at(count_count) << endl;
+			count_count++;
+			
+		} // end if input good
+	} // end while not eof
+	count_in.close();
+// 	cout << "Count read end." << endl;
+	
+	// gw: loop over loops
+	fill_count = 0;
+	for(int cur_loop = 0; cur_loop < count_count; cur_loop++){
+// 		cout << "checking loop " << cur_loop << " of " << count_count << endl;
+		
+		cur_loop_start = loop_start.at(cur_loop) - 1;
+        cur_loop_length = loop_stop.at(cur_loop) - cur_loop_start;
+	
+		// gw: loop over point pairs in current loop
+		for(int cur_pair = 0; cur_pair < cur_loop_length; cur_pair++){
+		
+// 			cout << "checking pair " << cur_pair << " of " << cur_loop_length << endl;
+            
+            p0_idx = cur_loop_start + cur_pair;
+            p1_idx = cur_loop_start + (cur_pair+1)%cur_loop_length;
+            pnt p0 = boundary_points.at(p0_idx);
+            pnt p1 = boundary_points.at(p1_idx);
+            point_delta = p1.dotForAngle(p0);
+            
+			// gw: if distance between pair is greater than allowed amount
+			//     then add some additional points
+// 			cout << "point delta * r_earth " << (point_delta*r_earth);
+// 			cout << " max_resolution " << max_resolution << endl;
+			if ( (point_delta * r_earth) > max_resolution ) {
+			
+				// gw: figure out how many points to added
+				add_count = (int)ceil( (point_delta * r_earth) ) / max_resolution;
+                add_spacing = 1.0 / ((double)add_count + 1);
+				denom = sin( point_delta );
+//                 cout << "adding " << add_count << " points, with ";
+//                 cout << point_delta*add_spacing*r_earth << "km spacing" << endl;
+			
+				// gw: loop for adding point(s)
+				for(int cur_add = 0; cur_add < add_count; cur_add++){
+					
+					// http://en.wikipedia.org/wiki/Slerp
+					t = add_spacing * ( (double)cur_add + 1 );
+					c0 = sin( (1.0 - t) * point_delta ) / denom;
+					c1 = sin( t * point_delta ) / denom;
+					pnt temp_point = c0 * p0 + c1 * p1;
+					temp_point.normalize();
+// 					cout << "point " << cur_add << ", distance covered ";
+// 					cout << temp_point.dotForAngle(p0)*r_earth << "km" << endl;
+					temp_point.idx = bdry_count + fill_count;
+					boundary_points.push_back(temp_point);
+					
+					fill_count++;
+				}
+				
+			} // end if need to add fill points
+			
+		} // end loop over point pairs in current loop
+		
+	} // end loop over loops
+	cout << "Read in " << bdry_count << " boundary points." << endl;
+	cout << "Made " << fill_count << " fill points." << endl;
+	cout << "There are " << boundary_points.size() << " boundary points total." << endl;
+	//cout << "Made " << boundary_points.size() << " boundary points." << endl;
 
 	num_bdry = boundary_points.size(); 
 
@@ -2620,11 +2813,7 @@ void gatherAllUpdatedPoints(){/*{{{*/
 }/*}}}*/
 /*}}}*/
 /* ***** Routines for Points ***** {{{*/
-void writePointsAsRestart(const int it){/*{{{*/
-	char temp[32];
-	sprintf(temp,"point_restart_%d.dat\0",it);
-	int junk = 0;
-	int i;
+void writePointsAsRestart(const int it, const restart_mode_type restart_mode, const fileio_mode_type fileio_mode){/*{{{*/
 
 	#ifdef _DEBUG
 		cerr << "Writing restart file " << id << endl;
@@ -2634,15 +2823,33 @@ void writePointsAsRestart(const int it){/*{{{*/
 		gatherAllUpdatedPoints();
 
 		if(id == master){
-			ofstream pts_out(temp);
 
-			for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
-				pts_out << (*point_itr) << endl;
+		#ifdef USE_NETCDF
+			cout << "restart mode " << restart_mode << " fileio_mode " << fileio_mode << endl;
+			if ( restart_mode == RESTART_OVERWRITE && fileio_mode == FILEIO_NETCDF ) {
+				writeRestartFileOverwriteNC( it, points );
+			} else if ( restart_mode == RESTART_OVERWRITE && fileio_mode == FILEIO_TXT ) {
+				writeRestartFileOverwriteTXT( it );
+		    } else if ( restart_mode == RESTART_OVERWRITE && fileio_mode == FILEIO_BOTH ) {
+		    	writeRestartFileOverwriteNC( it, points );
+		    	writeRestartFileOverwriteTXT( it );
+		    } else if ( restart_mode == RESTART_RETAIN  && fileio_mode == FILEIO_NETCDF ) {
+		    	writeRestartFileRetainNC( it, points );
+			} else if ( restart_mode == RESTART_RETAIN && fileio_mode == FILEIO_TXT ) {
+				writeRestartFileRetainTXT( it );
+			} else if ( restart_mode == RESTART_RETAIN && fileio_mode == FILEIO_BOTH ) {
+				writeRestartFileRetainNC( it, points );
+				writeRestartFileRetainTXT( it );
 			}
-			
-			pts_out.close();
+		#else
+			if ( restart_mode == RESTART_OVERWRITE ) {
+				writeRestartFileOverwriteTXT( it );
+			} else if ( restart_mode == RESTART_RETAIN ) {
+				writeRestartFileRetainTXT( it );
+		    }
+		#endif
 		}
-
+		
 		/*
 		if(id == master){
 			ofstream pts_out(temp);
@@ -2683,6 +2890,140 @@ void writePointsAsRestart(const int it){/*{{{*/
 		cerr << "Done Writing restart file " << id << endl;
 	#endif
 }/*}}}*/
+
+#ifdef USE_NETCDF
+int writeRestartFileOverwriteNC( const int it, const vector<pnt> &points ) {
+
+	// set up the file and create
+	static const int NC_ERR = 2;
+	NcError err(NcError::verbose_nonfatal);
+	NcFile grid("point_restart.nc", NcFile::Replace);
+	if(!grid.is_valid()) return NC_ERR;
+	
+	// define dimensions
+	NcDim *nPointsDim;
+	NcDim *itDim;
+	
+	// store dimensions
+	if (!(nPointsDim = grid.add_dim( "nPoints",	points.size() ))) return NC_ERR;
+	if (!(itDim = grid.add_dim( "it", it ))) return NC_ERR;
+		
+	// create/populate point arrays
+	double *xPoint, *yPoint, *zPoint;
+	xPoint = new double[nPointsDim->size()];
+	yPoint = new double[nPointsDim->size()];
+	zPoint = new double[nPointsDim->size()];
+	
+	for ( int ii = 0; ii < nPointsDim->size(); ii++ ) {
+		xPoint[ii] = points.at(ii).x;
+		yPoint[ii] = points.at(ii).y;
+		zPoint[ii] = points.at(ii).z;
+	}
+	
+	// define coordinate ncvars
+	NcVar *xPointVar, *yPointVar, *zPointVar;
+	if (!(xPointVar = grid.add_var("xPoint", ncDouble, nPointsDim))) return NC_ERR;
+	if (!(yPointVar = grid.add_var("yPoint", ncDouble, nPointsDim))) return NC_ERR;
+	if (!(zPointVar = grid.add_var("zPoint", ncDouble, nPointsDim))) return NC_ERR;
+	
+	// write coordinate data
+	if (!xPointVar->put(xPoint,nPointsDim->size())) return NC_ERR;
+	if (!yPointVar->put(yPoint,nPointsDim->size())) return NC_ERR;
+	if (!zPointVar->put(zPoint,nPointsDim->size())) return NC_ERR;
+	
+	// clear memory
+	delete xPoint;
+	delete yPoint;
+	delete zPoint;
+	
+	// scope closure destroys NC objs
+	return 0;
+	
+}
+
+int writeRestartFileRetainNC( const int it, const vector<pnt> &points ) {
+
+	// set up the file and create
+	static const int NC_ERR = 2;
+	NcError err(NcError::verbose_nonfatal);
+	std::ostringstream int_hole;
+	int_hole << it;
+	std::string restart_name = "point_restart_" + int_hole.str() + ".nc";
+	NcFile grid(restart_name.c_str(), NcFile::Replace);
+	if(!grid.is_valid()) return NC_ERR;
+
+	// define dimensions
+	NcDim *nPointsDim;
+	NcDim *itDim;
+	
+	// store dimensions
+	if (!(nPointsDim = grid.add_dim( "nPoints",	points.size() ))) return NC_ERR;
+	if (!(itDim = grid.add_dim( "it", it ))) return NC_ERR;
+		
+	// create/populate point arrays
+	double *xPoint, *yPoint, *zPoint;
+	xPoint = new double[nPointsDim->size()];
+	yPoint = new double[nPointsDim->size()];
+	zPoint = new double[nPointsDim->size()];
+	
+	for ( int ii = 0; ii < nPointsDim->size(); ii++ ) {
+		xPoint[ii] = points.at(ii).x;
+		yPoint[ii] = points.at(ii).y;
+		zPoint[ii] = points.at(ii).z;
+	}
+	
+	// define coordinate ncvars
+	NcVar *xPointVar, *yPointVar, *zPointVar;
+	if (!(xPointVar = grid.add_var("xPoint", ncDouble, nPointsDim))) return NC_ERR;
+	if (!(yPointVar = grid.add_var("yPoint", ncDouble, nPointsDim))) return NC_ERR;
+	if (!(zPointVar = grid.add_var("zPoint", ncDouble, nPointsDim))) return NC_ERR;
+	
+	// write coordinate data
+	if (!xPointVar->put(xPoint,nPointsDim->size())) return NC_ERR;
+	if (!yPointVar->put(yPoint,nPointsDim->size())) return NC_ERR;
+	if (!zPointVar->put(zPoint,nPointsDim->size())) return NC_ERR;
+	
+	// clear memory
+	delete xPoint;
+	delete yPoint;
+	delete zPoint;
+	
+	// scope closure destroys NC objs
+	return 0;
+
+}
+#endif
+
+int writeRestartFileOverwriteTXT( const int it ) {
+
+	char temp[32];
+	sprintf(temp,"point_restart.dat\0");
+
+	ofstream pts_out(temp);
+
+	for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
+		pts_out << (*point_itr) << endl;
+	}
+	
+	pts_out.close();
+	
+}
+
+int writeRestartFileRetainTXT( const int it ) {
+	
+	char temp[32];
+	sprintf(temp,"point_restart_%d.dat\0",it);
+
+	ofstream pts_out(temp);
+
+	for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
+		pts_out << (*point_itr) << endl;
+	}
+	
+	pts_out.close();
+
+}
+
 double density(const pnt &p){/*{{{*/
 	//density returns the value of the density function at point p
 	return 1.0; // Uniform density
