@@ -17,6 +17,7 @@
 //  Author:
 //
 //   Doug Jacobsen
+//   Geoff Womeldorff
 //
 //**************************************************
 
@@ -207,6 +208,11 @@ unordered_set<int, int_hasher>::iterator region_neigh_itr;
 vector<int>::iterator neighbor_itr;
 vector<tri>::iterator tri_itr;
 
+//ddd related quantities
+vector<pnt> ddpoints;  // input coordinates where density data is present
+vector<double> ddvals; // input values for density data 
+int dd_num_pts; 	   // length of ddpoints and ddvals
+
 /* ***** Setup Routines *****{{{*/
 void readParamsFile();
 void buildRegions();
@@ -221,6 +227,9 @@ void readPoints();
 void makeMCPoints(int n);
 void makeGeneralizedSpiralPoints(int n);
 /*}}}*/
+/* ***** Data Driven Density Routines ***** {{{*/
+void readDDPoints();
+void readDDVals();
 /* ***** Integration Routines ***** {{{*/
 void divideIntegrate(const int levs, const pnt &A, const pnt &B, const pnt &C, pnt &Top, double &bot);
 void init_quadrature();
@@ -309,6 +318,10 @@ int main(int argc, char **argv){
 			pts_out << (*point_itr) << endl;
 		}
 		pts_out.close();
+		
+		// read in the dd points and values
+		readDDPoints();
+		readDDVals();
 	}
 
 	// Each processor needs to setup the quadrature rules.
@@ -904,6 +917,58 @@ void readPoints(){/*{{{*/
 	num_pts = points.size();
 
 	cout << "Read in " << num_pts << " points from SaveVertices" << endl;
+
+}/*}}}*/
+void readDDPoints(){/*{{{*/
+	//Read in initial point set from SaveDDPoints
+	ifstream ddpoints_in("SaveDDPoints");
+	pnt p;
+	int i;
+
+	i = 0;
+	while(!ddpoints_in.eof()){
+		ddpoints_in >> p;
+		ddpoints_in.ignore(10000,'\n');
+		p.idx = i;
+		p.isBdry = 0;
+		p.normalize();
+
+		if(ddpoints_in.good()){
+			ddpoints.push_back(p);
+// 			cout << " i " << i << " p.x " << p.x << " p.y " << p.y << " p.z " << p.z << endl;
+		}
+		i++;
+	}
+
+	dd_num_pts = ddpoints.size();
+
+	cout << "Read in " << dd_num_pts << " points from SaveDDPoints" << endl;
+
+}/*}}}*/
+void readDDVals(){/*{{{*/
+	//Read in initial point set from SaveDDVals
+	ifstream ddvals_in("SaveDDVals");
+	double v;
+	int i;
+
+	i = 0;
+	while(!ddvals_in.eof()){
+		ddvals_in >> v;
+		ddvals_in.ignore(10000,'\n');
+
+		if(ddvals_in.good()){
+			ddvals.push_back(v);
+// 			cout << "i " << i << " v " << v << endl;
+		}
+		i++;
+	}
+
+	if ( !(ddpoints.size()==ddvals.size()) ) {
+		cout << "Length of ddvals and ddpoints does not match." << endl;
+		exit(1);
+	}
+
+	cout << "Read in " << dd_num_pts << " values from SaveDDVals" << endl;
 
 }/*}}}*/
 void makeMCPoints(int n){/*{{{*/
