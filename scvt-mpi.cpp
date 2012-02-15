@@ -41,6 +41,8 @@
 #include "Triangle/triangle.h"
 #include "triangulation.h"
 
+#include <ANN/ANN.h>	
+
 #define SEED	3729
 
 // Uses boost mpi to make use of serialization routines for packing and unpacking of classes
@@ -209,10 +211,19 @@ vector<int>::iterator neighbor_itr;
 vector<tri>::iterator tri_itr;
 
 //ddd related quantities
-vector<pnt> ddpoints;  // input coordinates where density data is present
-vector<double> ddvals; // input values for density data 
-int dd_num_pts; 	   // length of ddpoints and ddvals
-
+vector<pnt> ddpoints;	// input coordinates where density data is present
+vector<double> ddvals;	// input values for density data 
+int dd_num_pts;			// length of ddpoints and ddvals
+int dim_ann = 3;		// dimension for use with ANN
+int k_ann = 5;			// number of nearest neighbors we request;
+ANNpointArray ddpoints_ann;	// data points in ANN format
+ANNpoint			query_ann;		// query point
+ANNidxArray			nn_idx_ann;		// near neighbor indices
+ANNdistArray		nn_dists_ann;	// near neighbor distances
+ANNkd_tree*			kdtree_ann;		// search structure
+vector<pnt> gs_interp_points;
+vector<double> gs_interp_vals;
+int interp_num_pts;
 /* ***** Setup Routines *****{{{*/
 void readParamsFile();
 void buildRegions();
@@ -229,7 +240,14 @@ void makeGeneralizedSpiralPoints(int n);
 /*}}}*/
 /* ***** Data Driven Density Routines ***** {{{*/
 void readDDPoints();
+bool readPtANN(istream &in, ANNpoint p);
+void printPtANN(ostream &out, ANNpoint p);
+void readDDPointsANN();
 void readDDVals();
+void startANN();
+void createANNKDTree();
+void makeGSPointsForANNQuery();
+void createDDInterpValues();
 /* ***** Integration Routines ***** {{{*/
 void divideIntegrate(const int levs, const pnt &A, const pnt &B, const pnt &C, pnt &Top, double &bot);
 void init_quadrature();
@@ -320,8 +338,13 @@ int main(int argc, char **argv){
 		pts_out.close();
 		
 		// read in the dd points and values
-		readDDPoints();
-		readDDVals();
+// 		readDDPoints();
+		readDDVals();	// goes first since ann array sized from it
+		startANN();
+		readDDPointsANN();
+		createANNKDTree();
+		makeGSPointsForANNQuery();
+		createDDInterpValues();
 	}
 
 	// Each processor needs to setup the quadrature rules.
@@ -945,6 +968,41 @@ void readDDPoints(){/*{{{*/
 	cout << "Read in " << dd_num_pts << " points from SaveDDPoints" << endl;
 
 }/*}}}*/
+bool readPtANN(istream &in, ANNpoint p)			// read point (false on EOF)
+{
+	for (int i = 0; i < dim_ann; i++) {
+		if(!(in >> p[i])) return false;
+	}
+	return true;
+}
+void printPtANN(ostream &out, ANNpoint p)			// print point
+{
+	out << "(" << p[0];
+	for (int i = 1; i < dim_ann; i++) {
+		out << ", " << p[i];
+	}
+	out << ")\n";
+}
+void readDDPointsANN(){
+	int npts_read = 0;
+	
+	// size point array
+	ddpoints_ann = annAllocPts(dd_num_pts, dim_ann);			// allocate data points
+	
+	// get the file handle
+	ifstream dd_datastream("SaveDDPoints");
+
+	// read in the points
+	while (npts_read < dd_num_pts && readPtANN(dd_datastream, ddpoints_ann[npts_read])) {
+// 		printPtANN(cout, ddpoints_ann[npts_read]);
+		npts_read++;
+	}
+	
+	if ( !(npts_read==dd_num_pts) ) {
+		cout << "Number of points read in to ddpoints_ann != dd_num_pts." << endl;
+		exit(1);
+	}
+}
 void readDDVals(){/*{{{*/
 	//Read in initial point set from SaveDDVals
 	ifstream ddvals_in("SaveDDVals");
@@ -963,14 +1021,109 @@ void readDDVals(){/*{{{*/
 		i++;
 	}
 
-	if ( !(ddpoints.size()==ddvals.size()) ) {
-		cout << "Length of ddvals and ddpoints does not match." << endl;
-		exit(1);
-	}
-
+// 	if ( !(ddpoints.size()==ddvals.size()) ) {
+// 		cout << "Length of ddvals and ddpoints does not match." << endl;
+// 		exit(1);
+// 	}
+	
+	dd_num_pts = ddvals.size();
+	
 	cout << "Read in " << dd_num_pts << " values from SaveDDVals" << endl;
 
 }/*}}}*/
+void startANN() {
+		query_ann = annAllocPt(dim_ann);					// allocate query point
+		nn_idx_ann = new ANNidx[k_ann];						// allocate near neigh indices
+		nn_dists_ann = new ANNdist[k_ann];					// allocate near neighbor dists
+}
+void createANNKDTree() {
+
+		kdtree_ann = new ANNkd_tree(					// build search structure
+						ddpoints_ann,					// the data points
+						dd_num_pts,						// number of points
+						dim_ann);						// dimension of space
+					
+}
+void makeGSPointsForANNQuery() {
+	//Create Generalize Spiral point set
+	int i;
+	int idx;
+	pnt p;
+	double phi_curr, h, theta, aa, bb, cc;
+	double gsC = 3.809;
+	double twopi_dp;
+	int n_gs_interp_pts = 3 * num_pts;
+	twopi_dp = 2.0*M_PI;
+	
+	p = pnt(0.0,0.0,0.0,0,0);
+
+	//	first pt, loop primer
+	i = 0;
+	h = -1.0;
+	theta = acos(h);
+	phi_curr = 0;
+
+	p.x = cos( phi_curr ) * sin( theta );
+	p.y = sin( phi_curr ) * sin( theta );
+	p.z = cos( theta );
+	p.idx = i;
+	p.isBdry = 0;
+	gs_interp_points.push_back(p);
+
+	for(i = 1; i < n_gs_interp_pts-1; i++){
+		h = -1.0 + (2.0*(double)(i))/(double)(n_gs_interp_pts-1);
+		theta = acos(h);
+		aa = phi_curr;
+		bb = gsC / sqrt((double)n_gs_interp_pts);
+		cc = 1.0 / sqrt(1.0-h*h);
+		phi_curr =  fmod(aa + bb * cc,twopi_dp);
+
+		p.x = cos( phi_curr ) * sin( theta );
+		p.y = sin( phi_curr ) * sin( theta );
+		p.z = cos( theta );
+		p.idx = i;
+		p.isBdry = 0;
+		gs_interp_points.push_back(p);
+	}
+
+	p.x = 0.0;
+	p.y = 0.0;
+	p.z = 1.0;
+	p.idx = n_gs_interp_pts-1;
+	p.isBdry = 0;
+	gs_interp_points.push_back(p);
+
+	interp_num_pts = gs_interp_points.size();
+	
+	cout << "Created " << gs_interp_points.size() << " GS points for use with ANN." << endl;
+}
+void createDDInterpValues() {
+	pnt p;
+	
+	for (unsigned int ii = 0; ii < interp_num_pts; ii++ ) {
+		cout << "  ii " << ii << endl;
+		cout << "Query point: ";				// echo query point
+		p = gs_interp_points[ii];
+		query_ann[0] = p.x;
+		query_ann[1] = p.y;
+		query_ann[2] = p.z;
+		printPtANN(cout, query_ann);
+
+		kdtree_ann->annkSearch(						// search
+					query_ann,						// query point
+					k_ann,							// number of near neighbors
+					nn_idx_ann,						// nearest neighbors (returned)
+					nn_dists_ann);					// distance (returned)
+
+		cout << "\tNN:\tIndex\tDistance\n";
+		for (int i = 0; i < k_ann; i++) {			// print summary
+			nn_dists_ann[i] = sqrt(nn_dists_ann[i]);			// unsquare distance
+			cout << "\t" << i << "\t" << nn_idx_ann[i] << "\t" << nn_dists_ann[i] << "\n";
+		}
+		
+	}
+	
+}
 void makeMCPoints(int n){/*{{{*/
 	//Create Monte Carlo random point set
 	int i, j; 

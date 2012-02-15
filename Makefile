@@ -2,6 +2,7 @@ CC = mpic++
 BDIR = /opt/local/boost_1_48_0-gcc
 NCDFDIR = /opt/local/netcdf-4.1.3-gcc
 LIBS = -I${BDIR}/include/ -L${BDIR}/lib/ -lboost_mpi -lboost_serialization
+LIBS += -Iann/include -Lann/lib -lANN
 
 ifeq ($(NETCDF),yes)
 NCDFDIR = /opt/local/netcdf-4.1.3-gcc
