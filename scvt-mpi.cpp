@@ -215,15 +215,18 @@ vector<pnt> ddpoints;	// input coordinates where density data is present
 vector<double> ddvals;	// input values for density data 
 int dd_num_pts;			// length of ddpoints and ddvals
 int dim_ann = 3;		// dimension for use with ANN
-int k_ann = 5;			// number of nearest neighbors we request;
+int k_ann = 5;			// number of nearest neighbors we request
+int idw_p = 1;			// power denominator of weight is raised to
 ANNpointArray ddpoints_ann;	// data points in ANN format
 ANNpoint			query_ann;		// query point
 ANNidxArray			nn_idx_ann;		// near neighbor indices
 ANNdistArray		nn_dists_ann;	// near neighbor distances
-ANNkd_tree*			kdtree_ann;		// search structure
+ANNkd_tree*			kdtree_ann;		// kdtree for ddvals -> gs_interp_vals
 vector<pnt> gs_interp_points;
 vector<double> gs_interp_vals;
 int interp_num_pts;
+ANNpointArray gs_interp_points_ann;
+ANNkd_tree*			density_kdtree;		// kdtree for gs_interp_vals -> density()
 /* ***** Setup Routines *****{{{*/
 void readParamsFile();
 void buildRegions();
@@ -245,9 +248,10 @@ void printPtANN(ostream &out, ANNpoint p);
 void readDDPointsANN();
 void readDDVals();
 void startANN();
-void createANNKDTree();
+void createANNKDTreeFromDDPoints();
 void makeGSPointsForANNQuery();
 void createDDInterpValues();
+void createDensityKDTreeAndSupport();
 /* ***** Integration Routines ***** {{{*/
 void divideIntegrate(const int levs, const pnt &A, const pnt &B, const pnt &C, pnt &Top, double &bot);
 void init_quadrature();
@@ -337,16 +341,18 @@ int main(int argc, char **argv){
 		}
 		pts_out.close();
 		
-		// read in the dd points and values
-// 		readDDPoints();
-		readDDVals();	// goes first since ann array sized from it
+	}
+// 	if (id == master) { // perform density routine setup
+
+		readDDVals();
 		startANN();
 		readDDPointsANN();
-		createANNKDTree();
+		createANNKDTreeFromDDPoints();
 		makeGSPointsForANNQuery();
 		createDDInterpValues();
-	}
-
+		createDensityKDTreeAndSupport();
+		
+// 	}
 	// Each processor needs to setup the quadrature rules.
 	init_quadrature();
 
@@ -968,6 +974,13 @@ void readDDPoints(){/*{{{*/
 	cout << "Read in " << dd_num_pts << " points from SaveDDPoints" << endl;
 
 }/*}}}*/
+// gw: both readPtANN and printPTANN are from:
+//----------------------------------------------------------------------
+//		File:			ann_sample.cpp
+//		Programmer:		Sunil Arya and David Mount
+//		Last modified:	03/04/98 (Release 0.1)
+//		Description:	Sample program for ANN
+//----------------------------------------------------------------------
 bool readPtANN(istream &in, ANNpoint p)			// read point (false on EOF)
 {
 	for (int i = 0; i < dim_ann; i++) {
@@ -1036,7 +1049,7 @@ void startANN() {
 		nn_idx_ann = new ANNidx[k_ann];						// allocate near neigh indices
 		nn_dists_ann = new ANNdist[k_ann];					// allocate near neighbor dists
 }
-void createANNKDTree() {
+void createANNKDTreeFromDDPoints() {
 
 		kdtree_ann = new ANNkd_tree(					// build search structure
 						ddpoints_ann,					// the data points
@@ -1097,17 +1110,41 @@ void makeGSPointsForANNQuery() {
 	
 	cout << "Created " << gs_interp_points.size() << " GS points for use with ANN." << endl;
 }
+// here we use the nearest neighbors and their distances to interpolate from our ddpoints/ddvals
+// onto our gs_interp_points/gs_interp_vals using Shepard IDW. u(x) is our interpolant - a 
+// member of gs_interp_vals, N is our number of nearest neighbors, u_i are ddvals, and w_i
+// are calculated from the distance between x (a member of gs_interp_points) and the NN from
+// ddpoints associated with u_i, i = 1,...,n. p is a parameter affecting interpolation sharpness.
+// low values of p will produce more smooth interpolants.
+//
+// u(x) = \sum_{i=0}^N\frac{w_i(x)u_i}{\sum_{j=0}^Nw_j(x)}
+//
+// w_i(x) = \frac{1}{d(x,x_i)^p}
+//
+// perhaps consider Modified Shepard's Method where weights are from within an R sphere
+// can ANN do this? unsure - know that it can do approx NN (thus the name) with an epsilon
+// tolerance, but unsure how to tell it search only within this R sphere
+// 
+// w_k(x) = \( \frac{R-d(x,x_k)}{Rd(x,x_k)} \)^2
+//
+// formulae from http://en.wikipeidia.org/Inverse_distance_weighting
+//
 void createDDInterpValues() {
 	pnt p;
+	double weight_sum;
+	double dens_max = 0.0;
+	double dens_min = ANN_DBL_MAX;
+	
+	gs_interp_vals.resize(interp_num_pts);		// size array to hold interpolated values
 	
 	for (unsigned int ii = 0; ii < interp_num_pts; ii++ ) {
-		cout << "  ii " << ii << endl;
-		cout << "Query point: ";				// echo query point
+// 		cout << "  ii " << ii << endl;
+// 		cout << "Query point: ";				// echo query point
 		p = gs_interp_points[ii];
 		query_ann[0] = p.x;
 		query_ann[1] = p.y;
 		query_ann[2] = p.z;
-		printPtANN(cout, query_ann);
+// 		printPtANN(cout, query_ann);
 
 		kdtree_ann->annkSearch(						// search
 					query_ann,						// query point
@@ -1115,14 +1152,50 @@ void createDDInterpValues() {
 					nn_idx_ann,						// nearest neighbors (returned)
 					nn_dists_ann);					// distance (returned)
 
-		cout << "\tNN:\tIndex\tDistance\n";
+// 		cout << "\tNN:\tIndex\tDistance\n";
+		// calc weights
+		weight_sum = 0.0;
 		for (int i = 0; i < k_ann; i++) {			// print summary
-			nn_dists_ann[i] = sqrt(nn_dists_ann[i]);			// unsquare distance
-			cout << "\t" << i << "\t" << nn_idx_ann[i] << "\t" << nn_dists_ann[i] << "\n";
+// 			cout << "i " << " nn_idx[i] " << nn_idx_ann[i] << " nn_dist[i] " << nn_dists_ann[i] << endl;
+	// 		nn_dists_ann[i] = sqrt(nn_dists_ann[i]);			// unsquare distance
+// 			cout << "\t" << i << "\t" << nn_idx_ann[i] << "\t" << nn_dists_ann[i] << "\n";
+			nn_dists_ann[i] = 1.0 / ( pow(nn_dists_ann[i],2 * idw_p) ); // turn dist into weight
+			weight_sum += nn_dists_ann[i];
+			
 		}
+		// calc interpolant
+		gs_interp_vals[ii] = 0.0;
+		for (int i = 0; i < k_ann; i++) {
+			gs_interp_vals[ii] += ( nn_dists_ann[i] / weight_sum ) * ddvals[ nn_idx_ann[i] ];
+// 			cout << "i " << i << " weight " << nn_dists_ann[i]/weight_sum << " val " << ddvals[nn_idx_ann[i]] << endl;
+		}
+// 		cout << "gs_interp_vals[ii] " << gs_interp_vals[ii] << endl;
+		
+		if (gs_interp_vals[ii]<dens_min)dens_min=gs_interp_vals[ii];
+		if (gs_interp_vals[ii]>dens_max)dens_max=gs_interp_vals[ii];
 		
 	}
-	
+	cout << "For interpolated density values, min: " << dens_min << " max: " << dens_max << endl;
+}
+void createDensityKDTreeAndSupport(){
+		
+		pnt p;
+		
+		gs_interp_points_ann = annAllocPts(interp_num_pts, dim_ann);			// allocate data points
+		
+		for (unsigned int ii = 0; ii < interp_num_pts; ii++) {
+			p = gs_interp_points[ii];
+			gs_interp_points_ann[ii][0] = p.x;
+			gs_interp_points_ann[ii][1] = p.y;
+			gs_interp_points_ann[ii][2] = p.z;
+		}
+		
+		density_kdtree = new ANNkd_tree(				// build search structure
+						gs_interp_points_ann,					// the data points
+						interp_num_pts,						// number of points
+						dim_ann);						// dimension of space
+		
+		gs_interp_points.clear();	// we will not need these anymore
 }
 void makeMCPoints(int n){/*{{{*/
 	//Create Monte Carlo random point set
@@ -2635,7 +2708,7 @@ void writePointsAsRestart(const int it){/*{{{*/
 }/*}}}*/
 double density(const pnt &p){/*{{{*/
 	//density returns the value of the density function at point p
-	return 1.0; // Uniform density
+// 	return 1.0; // Uniform density
 
 	/* Density function for Shallow Water Test Case 5 
 	pnt cent;
@@ -2660,6 +2733,31 @@ double density(const pnt &p){/*{{{*/
 
 	return density;
 	// */
+	
+	// density using gs_interp_vals and IDW
+	double density_return = 0.0;
+	double weight_sum = 0.0;
+	query_ann[0] = p.x;
+	query_ann[1] = p.y;
+	query_ann[2] = p.z;
+
+	density_kdtree->annkSearch(query_ann, k_ann, nn_idx_ann, nn_dists_ann);
+
+	// calc weights
+	for (int i = 0; i < k_ann; i++) {			// print summary
+// 			cout << "i " << " nn_idx[i] " << nn_idx_ann[i] << " nn_dist[i] " << nn_dists_ann[i] << endl;
+		nn_dists_ann[i] = 1.0 / ( pow(nn_dists_ann[i],2 * idw_p) ); // turn dist into weight
+		weight_sum += nn_dists_ann[i];
+		
+	}
+	
+	// calc interpolant
+	for (int i = 0; i < k_ann; i++) {
+		density_return += ( nn_dists_ann[i] / weight_sum ) * gs_interp_vals[ nn_idx_ann[i] ];
+// 			cout << "i " << i << " weight " << nn_dists_ann[i]/weight_sum << " val " << ddvals[nn_idx_ann[i]] << endl;
+	}
+	
+	return density_return;
 
 }/*}}}*/
 /*}}}*/
