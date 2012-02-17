@@ -1,12 +1,11 @@
 CC = mpic++
-BDIR = /opt/local/boost_1_48_0-gcc
-NCDFDIR = /opt/local/netcdf-4.1.3-gcc
-LIBS = -I${BDIR}/include/ -L${BDIR}/lib/ -lboost_mpi -lboost_serialization
+BDIR = 
+LIBS = -L${BDIR}/lib/ -lboost_mpi -lboost_serialization
 
 ifeq ($(NETCDF),yes)
-NCDFDIR = /opt/local/netcdf-4.1.3-gcc
-LIBS += -I$(NCDFDIR)/include/ -L$(NCDFDIR)/lib/ -lnetcdf -lnetcdf_c++
-NCDF_FLAGS = -DUSE_NETCDF
+NCDFDIR = 
+LIBS += -L$(NCDFDIR)/lib/ -lnetcdf -lnetcdf_c++
+NCDF_FLAGS = -DUSE_NETCDF -I$(NCDFDIR)/include
 endif
 
 FLAGS = -O3 -m64 $(NCDF_FLAGS)
@@ -18,22 +17,22 @@ PLATFORM=_MACOS
 PLATFORM=_LINUX
 
 ifeq ($(PLATFORM),_LINUX)
-	FLAGS = -O3 -m64 -DLINUX $(NCDF_FLAGS)
+	FLAGS = -O3 -m64 -DLINUX $(NCDF_FLAGS) -I$(BDIR)/include/boost
 	DFLAGS = -g -m64 -D_DEBUG -DLINUX
 endif
 
 ifeq ($(PLATFORM),_MACOS)
-	FLAGS = -O3 -m64 $(NCDF_FLAGS)
+	FLAGS = -O3 -m64 $(NCDF_FLAGS) -I$(BDID)/include/boost
 	DFLAGS = -g -m64 -D_DEBUG
 endif
 
 TRILIBDEFS= -DTRILIBRARY
 
 all: trilibrary
-	${CC} scvt-mpi.cpp ${TRISRC}triangle.o ${LIBS} ${FLAGS} -o ${EXE}
+	${CC} scvt-mpi.cpp ${TRISRC}triangle.o ${FLAGS} -o ${EXE} ${LIBS} 
 
 debug: trilibrary-debug
-	${CC} scvt-mpi.cpp ${TRISRC}triangle.o ${LIBS} ${DFLAGS} -o ${EXE}
+	${CC} scvt-mpi.cpp ${TRISRC}triangle.o ${DFLAGS} -o ${EXE} ${LIBS} 
 
 trilibrary:
 	$(CC) $(CSWITCHES) $(TRILIBDEFS) ${FLAGS} -c -o ${TRISRC}triangle.o ${TRISRC}triangle.c

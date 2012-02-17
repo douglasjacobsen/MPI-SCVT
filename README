@@ -5,11 +5,9 @@ About:
 	Dissertation work while he was a Ph.D. student at Florida State University.
 
 Compiling:
-	To compile, you need the boost mpi and serialization libraries
-	to be in your LD_LIBRARY_PATH, and the header files in your PATH variables.
-	Afterwards, compilation is as simple as typing "make", a debug version can be compiled
-	using "make debug" as well. These commands create MpiScvt.x which can be run from the
-	command line.
+	In order to compile MPI-SCVT you need to edit the Makefile and add the paths to boost (required) and netcdf libraries (optional).
+	After the Makefile is configured correctly, "make" will build MPI-SCVT without netcdf support, "make NETCDF=yes" will build with 
+	netcdf support (only on restart files currently), and "make debug" will build the debug version of MPI-SCVT.
 
 Boost:
 	Boost can be downloaded from:
