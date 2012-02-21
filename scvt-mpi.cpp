@@ -12,11 +12,12 @@
 // 
 //  Modified:
 //
-//    03 December 2010
+//    02 February 2012
 //
 //  Author:
 //
 //   Doug Jacobsen
+//   Geoff Womeldorff
 //
 //**************************************************
 
@@ -33,6 +34,9 @@
 #include <math.h>
 #include <assert.h>
 
+#ifdef USE_NETCDF
+#include <netcdfcpp.h>
+#endif
 
 #include <boost/mpi.hpp>
 #include <boost/serialization/vector.hpp>
@@ -82,6 +86,9 @@ class region{/*{{{*/
 				ar & neighbors;
 				ar & neighbors1;
 				ar & neighbors2;
+				ar & boundary_points;
+				ar & loop_start;
+				ar & loop_stop;
 			}
 
 	public:
@@ -93,6 +100,9 @@ class region{/*{{{*/
 		vector<int> neighbors; // First Level of Neighbors
 		vector<int> neighbors1; // First Level of Neighbors + Self
 		vector<int> neighbors2; // Second Level of Neighbors + First Level of Neighbors + Self
+		vector<pnt> boundary_points;
+		vector<int> loop_start; // beginning point in loop
+		vector<int> loop_stop; // ending point in loop
 };/*}}}*/
 
 struct int_hasher {/*{{{*/
@@ -161,13 +171,25 @@ enum {sort_dot, sort_vor};
 // Global constants
 int points_begin = 0;
 int num_pts = 162;
+int num_bdry = 0;
 int max_it = 100;
+int max_it_no_proj = 100;
+int max_it_scale_alpha = 0;
 int div_levs = 1;
 int num_bisections = 0;
 int conv = 0;
 int restart = 0;
 int sort_method = sort_dot;
+double min_bdry_angle = 1.0;
 double eps = 1.0E-10;
+double proj_alpha;
+double max_resolution = 4.0;
+
+//gw: restart mode type and variable (move to a header?)
+enum restart_mode_type { RESTART_OVERWRITE, RESTART_RETAIN };
+restart_mode_type restart_mode = RESTART_OVERWRITE;
+enum fileio_mode_type { FILEIO_TXT, FILEIO_NETCDF, FILEIO_BOTH };
+fileio_mode_type fileio_mode = FILEIO_TXT;
 
 //Define variable for quadrature rules
 int quad_rule = 2;
@@ -192,6 +214,12 @@ vector<pnt> points;
 vector<pnt> n_points;
 vector<pnt>::iterator point_itr;
 
+vector<pnt> boundary_points;
+vector<pnt>::iterator boundary_itr;
+
+vector<int> loop_start;
+vector<int> loop_stop;
+
 //Each processor has a list of all regions, as well as it's own regions (only one per processor currently)
 vector<region> my_regions;
 vector<region> regions;
@@ -211,6 +239,8 @@ vector<tri>::iterator tri_itr;
 void readParamsFile();
 void buildRegions();
 void printRegions();
+void readBoundaries();
+void readBoundariesV2();
 /*}}}*/
 /* ***** Bisect Edges Routines *****{{{*/
 void bisectEdges(int end);
@@ -234,11 +264,14 @@ void quadrature19P(const pnt &A, const pnt &B, const pnt &C, pnt &top, double &b
 /*}}}*/
 /* ***** Generic Region Routines *****{{{ */
 void sortPoints(int sort_type, vector<region> &region_vec);
+void sortBoundaryPoints(vector<region> &region_vec);
 void triangulateRegions(vector<region> &region_vec);
 void integrateRegions(vector<region> &region_vec);
 void computeMetrics(double &ave, double &max, double &l1);
 void clearRegions(vector<region> &region_vec);
 void makeFinalTriangulations(vector<region> &region_vec);
+void projectToBoundary(vector<region> &region_vec);
+void projectToBoundary2(vector<region> &region_vec);
 /*}}}*/
 /* ***** Specific Region Routines ***** {{{ */
 void printAllFinalTriangulation();
@@ -249,22 +282,28 @@ void storeMyFinalTriangulation();
 void transferUpdatedPoints();
 void gatherAllUpdatedPoints();
 /*}}}*/
-
 /* ***** Routines for Points *****{{{*/
-void writePointsAsRestart(int it);
+void writePointsAsRestart(const int it, const restart_mode_type restart_mode, const fileio_mode_type fileio_mode);
+#ifdef USE_NETCDF
+int writeRestartFileOverwriteNC( const int it, const vector<pnt> &points );
+int writeRestartFileRetainNC( const int it, const vector<pnt> &points );
+#endif
+int writeRestartFileOverwriteTXT( const int it );
+int writeRestartFileRetainTXT( const int it );
 double density(const pnt &p);
+double ellipse_density(const pnt &p, double lat_c, double lon_c, double lat_width, double lon_width);
 /*}}}*/
 
 int main(int argc, char **argv){
 	int bisection;
 	int it, i;
-	int stop;
-	mpi::request *ave_comms;
-	mpi::request *max_comms;
-	mpi::request *l1_comms;
+	int stop, do_proj;
+	int ave_points, my_points;
+	mpi::request *ave_comms, *max_comms, *l1_comms;
 	double *my_ave, *my_max, *my_l1;
 	double glob_ave, glob_max, glob_l1;
-	optional ave_opti, max_opti;
+	optional ave_opti, max_opti, l1_opti;
+	pnt p;
 
 	flags = new char[flags_str.size()+1];
 	strcpy(flags,flags_str.c_str());
@@ -281,6 +320,7 @@ int main(int argc, char **argv){
 	my_ave = new double[num_procs];
 	my_max = new double[num_procs];
 	my_l1 = new double[num_procs];
+
 	ave_comms = new mpi::request[num_procs];
 	max_comms = new mpi::request[num_procs];
 	l1_comms = new mpi::request[num_procs];
@@ -302,9 +342,11 @@ int main(int argc, char **argv){
 			cout << "Points being created with Generalized Spiral." << endl;
 			makeGeneralizedSpiralPoints(num_pts);
 		}
+		//readBoundaries();
+		readBoundariesV2();
 		buildRegions();
 
-		ofstream pts_out("point_restart_0.dat");
+		ofstream pts_out("point_initial.dat");
 		for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
 			pts_out << (*point_itr) << endl;
 		}
@@ -318,6 +360,8 @@ int main(int argc, char **argv){
 	mpi::broadcast(world,num_pts,master);
 	mpi::broadcast(world,max_it,master);
 	mpi::broadcast(world,restart,master);
+	mpi::broadcast(world,max_it_no_proj,master);
+	mpi::broadcast(world,max_it_scale_alpha,master);
 	mpi::broadcast(world,num_bisections,master);
 	mpi::broadcast(world,div_levs,master);
 	mpi::broadcast(world,conv,master);
@@ -325,6 +369,7 @@ int main(int argc, char **argv){
 	mpi::broadcast(world,quad_rule,master);
 	mpi::broadcast(world,regions,master);
 	mpi::broadcast(world,points,master);
+	mpi::broadcast(world,boundary_points,master);
 
 	//printRegions();
 
@@ -332,7 +377,6 @@ int main(int argc, char **argv){
 	for(i = 0; i < num_timers; i++){
 		my_timers[i] = mpi_timer(names[i]);
 	}
-
 
 	// Each processor clears my_regions (to make sure it's empty) and add it's own region into it's list.
 	// If there is only 1 processor, that processor takes all regions, which is a serial computation.
@@ -350,6 +394,8 @@ int main(int argc, char **argv){
 		}
 	}
 
+	sortBoundaryPoints(my_regions);
+
 	// Loop over bisections
 	for(bisection = 0; bisection <= num_bisections; bisection++){
 		// Clear loop timers
@@ -361,7 +407,10 @@ int main(int argc, char **argv){
 		my_timers[0].start();
 
 		stop = 0;
+		do_proj = 1;
 		for(it = 0; it < max_it && !stop; it++){
+
+			proj_alpha = max(it-max_it_no_proj, 0)/max_it_scale_alpha;
 			glob_ave = 0.0;
 			glob_max = 0.0;
 			glob_l1 = 0.0;
@@ -385,11 +434,16 @@ int main(int argc, char **argv){
 			triangulateRegions(my_regions);
 
 			my_timers[2].stop();
+
 			my_timers[3].start(); // Integration Timer
 
 			integrateRegions(my_regions);
 
 			my_timers[3].stop();
+
+			if(it > max_it_no_proj){
+				projectToBoundary(my_regions);
+			}
 
 			my_timers[4].start(); // Metrics Timer
 
@@ -401,7 +455,6 @@ int main(int argc, char **argv){
 					ave_comms[i] = world.irecv(i,msg_ave,my_ave[i]);
 					max_comms[i] = world.irecv(i,msg_max,my_max[i]);
 					l1_comms[i] = world.irecv(i,msg_l1,my_l1[i]);
-
 				}
 			} else {
 				ave_comms[id] = world.isend(master,msg_ave,my_ave[id]);
@@ -421,17 +474,15 @@ int main(int argc, char **argv){
 				glob_ave = my_ave[id];
 				glob_max = my_max[id];
 				glob_l1 = my_l1[id];
+
 				for(i = 1; i < num_procs; i++){
 					ave_opti = ave_comms[i].test();
 					max_opti = max_comms[i].test();
+					l1_opti = l1_comms[i].test();
 
-					if(!ave_opti){
-						ave_comms[i].wait();
-					}
-
-					if(!max_opti){
-						max_comms[i].wait();
-					}
+					if(!ave_opti) ave_comms[i].wait();
+					if(!max_opti) max_comms[i].wait();
+					if(!l1_opti) l1_comms[i].wait();
 
 					glob_ave += my_ave[i];
 					glob_max = std::max(glob_max, my_max[i]);
@@ -439,6 +490,7 @@ int main(int argc, char **argv){
 				}
 				glob_ave = sqrt(glob_ave)/points.size();
 				glob_l1 = glob_l1/points.size();
+
 				cout << it << " " << glob_ave << " " << glob_l1 << " " << glob_max << endl;
 
 				if(conv == 1 && glob_ave < eps){
@@ -456,7 +508,7 @@ int main(int argc, char **argv){
 			
 			if(restart > 0 && it > 0){
 				if(it%restart == 0){
-					writePointsAsRestart(it);
+					writePointsAsRestart(it, restart_mode, fileio_mode);
 				}
 			}
 		}
@@ -482,37 +534,27 @@ int main(int argc, char **argv){
 	}
 
 	//Compute average points per region for diagnostics
-	if(id == master){
-		clearRegions(regions);
-		sortPoints(sort_method, regions);
-		int ave_points;
-		ave_points = 0;
-		for(region_itr = regions.begin(); region_itr != regions.end(); ++region_itr){
-			ave_points += (*region_itr).points.size();
-		}
+	ave_points = 0;
+	my_points = 0;
+	clearRegions(my_regions);
+	sortPoints(sort_method, my_regions);
+	for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
+		my_points += (*region_itr).points.size();
+	}
 
+	mpi::reduce(world, my_points, ave_points, std::plus<int>(), master);
+
+	ave_points = ave_points / regions.size();	
+	if(id == master){
 		cout << endl;
-		ave_points = ave_points / regions.size();
 		cout << "Average points per region: " << ave_points << endl;
 		cout << endl;
 	}
-
 
 	global_timers[0].stop();
 	//Gather all updated points onto master processor, for printing to end_points.dat
 	global_timers[1].start(); // Global Gather Timer
 	gatherAllUpdatedPoints();
-
-	if(id == master){
-		ofstream end_pts("end_points.dat");
-		ofstream pt_dens("point_density.dat");
-		for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
-			end_pts << (*point_itr) << endl;
-			pt_dens << density((*point_itr)) << endl;
-		}
-		end_pts.close();
-		pt_dens.close();
-	}
 	global_timers[1].stop();
 
 	// Compute final triangulation by merging all triangulations from each processor into an
@@ -525,6 +567,22 @@ int main(int argc, char **argv){
 	makeFinalTriangulations(my_regions);
 	printMyFinalTriangulation();
 	global_timers[2].stop();
+
+	if(id == master){
+		ofstream end_pts("end_points.dat");
+		ofstream pt_dens("point_density.dat");
+		ofstream bdry_pts("boundary_points.dat");
+		for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
+			end_pts << (*point_itr) << endl;
+			pt_dens << density((*point_itr)) << endl;
+		}
+		for(boundary_itr = boundary_points.begin(); boundary_itr != boundary_points.end(); boundary_itr++){
+			bdry_pts << (*boundary_itr) << endl;
+		}
+		end_pts.close();
+		pt_dens.close();
+		bdry_pts.close();
+	}
 
 	//Bisect all edges of all triangles to give an extra point set at the end, bisected_points.dat
 	global_timers[3].start(); // Final Bisection Timer
@@ -549,6 +607,8 @@ void readParamsFile(){/*{{{*/
 	//If Params doesn't exist, write out Params with a default set of parameters
 	string junk;
 	ifstream params("Params");
+	int temp_restart_mode;
+	int temp_fileio_mode;
 
 	if(!params){
 		cout << "Error opening Params file." << endl;
@@ -561,7 +621,11 @@ void readParamsFile(){/*{{{*/
 		pout << "162" << endl;
 		pout << "How many iterations do you want to run for, if convergence isn't reached?" << endl;
 		pout << "1000" << endl;
-		pout << "Hoe often, in iterations, do you want the point set written to a file? (Longer is better)" << endl << 500 << endl;
+		pout << "How many iterations do you want to run without projection onto the boundary?" << endl;
+		pout << "10000" << endl;
+		pout << "How many iterations do you want with a variable projection distance? (Minimum of 1)" << endl;
+		pout << "0" << endl;
+		pout << "How often, in iterations, do you want the point set written to a file? (Longer is better)" << endl << 500 << endl;
 		pout << "How many sub-triangle divisions would you like? (Minimum of 1, Causes every triangle to be divided into 4^n triangles)" << endl;
 		pout << "1" << endl;
 		pout << "How many bisections do you want until your final point set? (Each bisection maps n -> 4*n-6)" << endl;
@@ -573,8 +637,15 @@ void readParamsFile(){/*{{{*/
 		pout << "1E-10" << endl;
 		pout << "What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point)" << endl;
 		pout << "2" << endl;
-		pout << "What sorting method do you want to use? (0 - dot product, 2 - voronoi)" << endl;
+		pout << "What sorting method do you want to use? (0 - dot product, 1 - voronoi)" << endl;
 		pout << "0" << endl;
+		pout << "What is the maximum allowable distance between boundary points? (Given in km)" << endl;
+		pout << "4.0" << endl;
+		pout << "Which format for restart files would you like? (0 - text, 1 - netcdf, 2 - both, 0 will be selected if netcdf is not linked)" << endl;
+		pout << "0" << endl;
+		pout << "Would you like one restart file, or a series? (0 - overwrite, 1 - retain, ignored if restart files are disabled above)" << endl;
+		pout << "0" << endl;
+
 		pout.close();
 
 		exit(1);
@@ -591,6 +662,12 @@ void readParamsFile(){/*{{{*/
 	params.ignore(10000,'\n');
 	getline(params,junk);
 	params >> restart;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> max_it_no_proj;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> max_it_scale_alpha;
 	params.ignore(10000,'\n');
 	getline(params,junk);
 	params >> div_levs;
@@ -611,8 +688,235 @@ void readParamsFile(){/*{{{*/
 	getline(params,junk);
 	params >> sort_method;
 	params.ignore(10000,'\n');
+	getline(params,junk);
+// 	params >> min_bdry_angle;
+	params >> max_resolution;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> temp_fileio_mode;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> temp_restart_mode;
+	params.ignore(10000,'\n');
+	
+	switch (temp_fileio_mode) {
+		case 0:
+			fileio_mode = FILEIO_TXT;
+			break;
+		case 1:
+			fileio_mode = FILEIO_NETCDF;
+			break;
+		case 2:
+			fileio_mode = FILEIO_BOTH;
+			break;
+		default:
+			cout << "Restart file format has incorrect value in params file. Should be one of {0,1,2}.";
+			exit(1);
+	}
+
+	switch (temp_restart_mode) {
+		case 0:
+			restart_mode = RESTART_OVERWRITE;
+			break;
+		case 1:
+			restart_mode = RESTART_RETAIN;
+			break;
+		default:
+			cout << "Restart mode (overwrite/retain) has incorrect value in params file. Should be one of {0,1}";
+			exit(1);
+	}
+
+// 	min_bdry_angle = min_bdry_angle * M_PI/180.0;
 
 	params.close();
+}/*}}}*/
+void readBoundaries(){/*{{{*/
+	int i, j, n_pts;
+	pnt p;
+	pnt p_b, p_e;
+	double dist;
+	double dlat, dlon;
+	double lat, lon;
+	double lat_b, lon_b, lat_e, lon_e;
+	double dtr;
+	ifstream bdry_in("SaveBoundaries");
+	
+	dtr = M_PI/180.0;
+
+	j = 0;
+
+	while(!bdry_in.eof()){
+		bdry_in >> lat_b >> lon_b;
+		bdry_in.ignore(10000,'\n');
+
+		bdry_in >> lat_e >> lon_e;
+		bdry_in.ignore(10000,'\n');
+
+		if(bdry_in.good()){
+			lat_b = lat_b * dtr;
+			lon_b = lon_b * dtr;
+			lat_e = lat_e * dtr;
+			lon_e = lon_e * dtr;
+
+			p_b = pntFromLatLon(lat_b, lon_b);
+			p_e = pntFromLatLon(lat_e, lon_e);
+
+			dist = p_b.dotForAngle(p_e);
+			n_pts = dist/min_bdry_angle;
+
+			p = p_b;
+
+			dlat = (lat_e - lat_b)/n_pts;
+			dlon = (lon_e - lon_b)/n_pts;
+
+			for(i = 0; i < n_pts; i++){
+				p = pntFromLatLon(lat_b + dlat*i, lon_b + dlon*i);
+
+				p.normalize();
+				p.idx = j;
+				p.isBdry = 0;
+
+				j++;
+				boundary_points.push_back(p);
+			}
+		}
+	}
+
+	bdry_in.close();
+
+
+	cout << "Made " << boundary_points.size() << " boundary points." << endl;
+
+	num_bdry = boundary_points.size(); 
+
+}/*}}}*/
+void readBoundariesV2(){/*{{{*/
+	int i, j, n_pts;
+	int count_count, bdry_count, fill_count, bdry_total;
+	int add_count;
+	int count_start, count_stop;
+	int cur_loop_start, cur_loop_length;
+	int p0_idx, p1_idx;
+	//pnt p;
+	//pnt p_b, p_e;
+	double bdry_lon, bdry_lat;
+	double dtr = M_PI/180.0;
+	double point_delta;
+	double add_spacing;
+	double denom;
+	double c0, c1;
+	double t, omega;
+	double r_earth = 6371.0; //avg radius in km
+// 	double max_resolution = 4.0; // max spacing between boundary points allowed in km
+	
+	// gw: read boundary points file
+// 	cout << "Boundary read begin." << endl;
+	bdry_count = 0;
+	ifstream bdry_in("SaveBoundaries");
+	while(!bdry_in.eof()){
+		bdry_in >> bdry_lon >> bdry_lat;
+		bdry_in.ignore(10000,'\n');
+	
+		if(bdry_in.good()){
+			
+			bdry_lon *= dtr;
+			bdry_lat *= dtr;
+			pnt p = pntFromLatLon(bdry_lat, bdry_lon);
+			
+			p.normalize();
+			p.idx = j;
+			p.isBdry = 0;
+			bdry_count++;
+			boundary_points.push_back(p);
+		} // end if input good
+			
+	} // end while not eof
+	bdry_in.close();
+// 	cout << "Boundary read end." << endl;
+	
+	// gw: read loop counts file
+// 	cout << "Count read begin." << endl;
+	count_count = 0;
+	ifstream count_in("SaveLoopCounts");
+	while(!count_in.eof()){
+		count_in >> count_start >> count_stop;
+		count_in.ignore(10000,'\n');
+		
+		if(count_in.good()){
+			loop_start.push_back(count_start);
+			loop_stop.push_back(count_stop);
+// 			cout << " count_count " << count_count << " count_start " << count_start;
+// 			cout << " count_stop " << count_stop << " loop_start.at(" << count_count;
+// 			cout << ") " << loop_start.at(count_count) << " loop_stop.at(" << count_count;
+// 			cout << ") " << loop_stop.at(count_count) << endl;
+			count_count++;
+			
+		} // end if input good
+	} // end while not eof
+	count_in.close();
+// 	cout << "Count read end." << endl;
+	
+	// gw: loop over loops
+	fill_count = 0;
+	for(int cur_loop = 0; cur_loop < count_count; cur_loop++){
+// 		cout << "checking loop " << cur_loop << " of " << count_count << endl;
+		
+		cur_loop_start = loop_start.at(cur_loop) - 1;
+        cur_loop_length = loop_stop.at(cur_loop) - cur_loop_start;
+	
+		// gw: loop over point pairs in current loop
+		for(int cur_pair = 0; cur_pair < cur_loop_length; cur_pair++){
+		
+// 			cout << "checking pair " << cur_pair << " of " << cur_loop_length << endl;
+            
+            p0_idx = cur_loop_start + cur_pair;
+            p1_idx = cur_loop_start + (cur_pair+1)%cur_loop_length;
+            pnt p0 = boundary_points.at(p0_idx);
+            pnt p1 = boundary_points.at(p1_idx);
+            point_delta = p1.dotForAngle(p0);
+            
+			// gw: if distance between pair is greater than allowed amount
+			//     then add some additional points
+// 			cout << "point delta * r_earth " << (point_delta*r_earth);
+// 			cout << " max_resolution " << max_resolution << endl;
+			if ( (point_delta * r_earth) > max_resolution ) {
+			
+				// gw: figure out how many points to added
+				add_count = (int)ceil( (point_delta * r_earth) ) / max_resolution;
+                add_spacing = 1.0 / ((double)add_count + 1);
+				denom = sin( point_delta );
+//                 cout << "adding " << add_count << " points, with ";
+//                 cout << point_delta*add_spacing*r_earth << "km spacing" << endl;
+			
+				// gw: loop for adding point(s)
+				for(int cur_add = 0; cur_add < add_count; cur_add++){
+					
+					// http://en.wikipedia.org/wiki/Slerp
+					t = add_spacing * ( (double)cur_add + 1 );
+					c0 = sin( (1.0 - t) * point_delta ) / denom;
+					c1 = sin( t * point_delta ) / denom;
+					pnt temp_point = c0 * p0 + c1 * p1;
+					temp_point.normalize();
+// 					cout << "point " << cur_add << ", distance covered ";
+// 					cout << temp_point.dotForAngle(p0)*r_earth << "km" << endl;
+					temp_point.idx = bdry_count + fill_count;
+					boundary_points.push_back(temp_point);
+					
+					fill_count++;
+				}
+				
+			} // end if need to add fill points
+			
+		} // end loop over point pairs in current loop
+		
+	} // end loop over loops
+	cout << "Read in " << bdry_count << " boundary points." << endl;
+	cout << "Made " << fill_count << " fill points." << endl;
+	cout << "There are " << boundary_points.size() << " boundary points total." << endl;
+	//cout << "Made " << boundary_points.size() << " boundary points." << endl;
+
+	num_bdry = boundary_points.size(); 
+
 }/*}}}*/
 void buildRegions(){/*{{{*/
 	//Read in region centers, and connectivity (triangulation) from files
@@ -725,6 +1029,7 @@ void buildRegions(){/*{{{*/
 
 		(*region_itr).points.clear();
 		(*region_itr).triangles.clear();
+		(*region_itr).boundary_points.clear();
 	}
 
 	// Build first and second levels of neighbors, for use in more complicated sort method.
@@ -755,6 +1060,7 @@ void buildRegions(){/*{{{*/
 	}
 
 	region_neighbors.clear();
+
 
 }/*}}}*/
 void printRegions(){/*{{{*/
@@ -1597,6 +1903,38 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 #endif
 	return;
 }/*}}}*/
+void sortBoundaryPoints(vector<region> &region_vec){/*{{{*/
+	//Sort points into my region(s).
+	//This is done using a dot product and checking if the dot product is inside of the region radius
+	double val, min_val;
+	int index;
+	//vector<region>::iterator region_itr;
+#ifdef _DEBUG
+	cerr << "Sorting Boundary Points " << id << endl;
+#endif
+	//simple dot product sort using the radius based decomposition.
+	for(point_itr = boundary_points.begin(); point_itr != boundary_points.end(); point_itr++){
+		min_val = M_PI;
+		for(region_itr = regions.begin(); region_itr != regions.end(); region_itr++){
+			val = (*point_itr).dotForAngle((*region_itr).center);
+
+			if(val < min_val){
+				min_val = val;
+				index = (*region_itr).center.idx;
+			}
+		}
+
+		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
+			if((*region_itr).center.idx == index){
+				(*region_itr).boundary_points.push_back((*point_itr));
+			}
+		}
+	}
+#ifdef _DEBUG
+	cerr << "Done Sorting Boundary Points (Local) " << id << endl;
+#endif
+	return;
+}/*}}}*/
 void triangulateRegions(vector<region> &region_vec){/*{{{*/
 	//Triangulate my region(s) points
 	//Points are first stereographically projected into a plane tanget to region center
@@ -1865,14 +2203,20 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 
 	n_points.clear();
 	for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
-		if(bots[(*point_itr).idx] != 0.0 && !(*point_itr).isBdry ){
-			np = tops[(*point_itr).idx]/bots[(*point_itr).idx];
-			np.idx = (*point_itr).idx;
-			np.isBdry = (*point_itr).isBdry;
-			np.normalize();
-			n_points.push_back(np);
-		} else if((*point_itr).isBdry){
-			n_points.push_back((*point_itr));
+		if(bots[(*point_itr).idx] != 0.0){
+			if(!(*point_itr).isBdry){
+				np = tops[(*point_itr).idx]/bots[(*point_itr).idx];
+				np.idx = (*point_itr).idx;
+				np.isBdry = (*point_itr).isBdry;
+				np.normalize();
+				n_points.push_back(np);
+			} else if((*point_itr).isBdry){
+				if((*point_itr).isBdry == 2){
+					(*point_itr).isBdry = 0;
+				}
+
+				n_points.push_back((*point_itr));
+			}
 		}
 	}
 
@@ -1899,6 +2243,7 @@ void computeMetrics(double &ave, double &max, double &l1){/*{{{*/
 	for(point_itr = n_points.begin(); point_itr != n_points.end(); ++point_itr){
 		norm_pt = points.at((*point_itr).idx) - (*point_itr);
 		val = norm_pt.magnitude();
+		val = points.at((*point_itr).idx).dotForAngle((*point_itr));
 
 		ave += val*val;
 		max = std::max(val,max);
@@ -2055,6 +2400,125 @@ void makeFinalTriangulations(vector<region> &region_vec){/*{{{*/
 	cerr << "Done triangulating points (local) " << id << endl;
 #endif
 	return;
+}/*}}}*/
+void projectToBoundary(vector<region> &region_vec){/*{{{*/
+	double new_min_dist, min_dist, dist, alpha, beta;	
+	pnt p, p_n;
+	pnt a, b, c;
+	pnt v1, v2, v3;
+	vector<int> closest_cell;
+	vector<int> proj_1_point;
+	vector<int> proj_2_point;
+	vector<int> search_flags;
+	int i, index1, index2;
+
+	for(i = 0; i < boundary_points.size(); i++){
+		closest_cell.push_back(-1);
+	}
+	for(i = 0; i < points.size(); i++){
+		proj_1_point.push_back(-1);
+		proj_2_point.push_back(-1);
+		search_flags.push_back(1);
+	}
+
+	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
+		for(boundary_itr = (*region_itr).boundary_points.begin(); boundary_itr != (*region_itr).boundary_points.end(); boundary_itr++){
+
+			min_dist = M_PI;
+			for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
+				dist = (*boundary_itr).dotForAngle((*point_itr));
+
+				if(dist < min_dist){
+					min_dist = dist;
+					closest_cell.at((*boundary_itr).idx) = (*point_itr).idx;
+				}
+			}
+
+		}
+	}
+
+	for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
+		min_dist = M_PI;
+
+		for(i = 0; i < closest_cell.size(); i++){
+			if(closest_cell.at(i) == (*point_itr).idx){
+				dist = (*point_itr).dotForAngle(boundary_points.at(i));
+
+				if(dist < min_dist){
+					min_dist = dist;
+					proj_1_point.at((*point_itr).idx) = i;
+				}
+			}
+		}
+
+		if(proj_1_point.at((*point_itr).idx) > -1){
+			closest_cell.at(proj_1_point.at((*point_itr).idx)) = -1;
+		}
+
+		min_dist = M_PI;
+
+		for(i = 0; i < closest_cell.size(); i++){
+			if(closest_cell.at(i) == (*point_itr).idx){
+				dist = (*point_itr).dotForAngle(boundary_points.at(i));
+
+				if(dist < min_dist){
+					min_dist = dist;
+					proj_2_point.at((*point_itr).idx) = i;
+				}
+			}
+		}
+
+	}
+
+	for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
+		if(proj_1_point.at((*point_itr).idx) > -1){
+			index1 = proj_1_point.at((*point_itr).idx);
+			index2 = proj_2_point.at((*point_itr).idx);
+			if(index2 > -1){
+				a = boundary_points.at(index1);
+				b = boundary_points.at(index2);
+
+				v1 = a - (*point_itr);
+				v2 = b - a;
+
+				alpha = v2.magnitude();
+				alpha = alpha*alpha;
+				alpha = -v1.dot(v2)/alpha;
+
+				if(alpha < 0.0){
+					p = boundary_points.at(index1);
+					p.idx = (*point_itr).idx;
+					p.isBdry = 0;
+					p.normalize();
+				} else {
+					p = a + alpha * (b - a);
+
+					p.idx = (*point_itr).idx;
+					p.isBdry = 0;
+					p.normalize();
+				}
+			} else {
+				p = boundary_points.at(index1);
+				p.idx = (*point_itr).idx;
+				p.isBdry = 0;
+				p.normalize();
+			}
+
+			alpha = std::min(1.0, proj_alpha);
+			p_n = alpha*p + (1.0 - alpha) * (*point_itr);
+			p_n.normalize();
+			p_n.idx = (*point_itr).idx;
+			p_n.isBdry = 0;
+
+
+			(*point_itr).x = p_n.x;
+			(*point_itr).y = p_n.y;
+			(*point_itr).z = p_n.z;
+			(*point_itr).idx = p_n.idx;
+			(*point_itr).isBdry = p_n.isBdry;
+		}
+	}
+
 }/*}}}*/
 /* }}} */
 /* ***** Specifc Region Routines ***** {{{*/
@@ -2352,11 +2816,7 @@ void gatherAllUpdatedPoints(){/*{{{*/
 }/*}}}*/
 /*}}}*/
 /* ***** Routines for Points ***** {{{*/
-void writePointsAsRestart(const int it){/*{{{*/
-	char temp[32];
-	sprintf(temp,"point_restart_%d.dat\0",it);
-	int junk = 0;
-	int i;
+void writePointsAsRestart(const int it, const restart_mode_type restart_mode, const fileio_mode_type fileio_mode){/*{{{*/
 
 	#ifdef _DEBUG
 		cerr << "Writing restart file " << id << endl;
@@ -2366,15 +2826,33 @@ void writePointsAsRestart(const int it){/*{{{*/
 		gatherAllUpdatedPoints();
 
 		if(id == master){
-			ofstream pts_out(temp);
 
-			for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
-				pts_out << (*point_itr) << endl;
+		#ifdef USE_NETCDF
+			cout << "restart mode " << restart_mode << " fileio_mode " << fileio_mode << endl;
+			if ( restart_mode == RESTART_OVERWRITE && fileio_mode == FILEIO_NETCDF ) {
+				writeRestartFileOverwriteNC( it, points );
+			} else if ( restart_mode == RESTART_OVERWRITE && fileio_mode == FILEIO_TXT ) {
+				writeRestartFileOverwriteTXT( it );
+		    } else if ( restart_mode == RESTART_OVERWRITE && fileio_mode == FILEIO_BOTH ) {
+		    	writeRestartFileOverwriteNC( it, points );
+		    	writeRestartFileOverwriteTXT( it );
+		    } else if ( restart_mode == RESTART_RETAIN  && fileio_mode == FILEIO_NETCDF ) {
+		    	writeRestartFileRetainNC( it, points );
+			} else if ( restart_mode == RESTART_RETAIN && fileio_mode == FILEIO_TXT ) {
+				writeRestartFileRetainTXT( it );
+			} else if ( restart_mode == RESTART_RETAIN && fileio_mode == FILEIO_BOTH ) {
+				writeRestartFileRetainNC( it, points );
+				writeRestartFileRetainTXT( it );
 			}
-			
-			pts_out.close();
+		#else
+			if ( restart_mode == RESTART_OVERWRITE ) {
+				writeRestartFileOverwriteTXT( it );
+			} else if ( restart_mode == RESTART_RETAIN ) {
+				writeRestartFileRetainTXT( it );
+		    }
+		#endif
 		}
-
+		
 		/*
 		if(id == master){
 			ofstream pts_out(temp);
@@ -2415,6 +2893,140 @@ void writePointsAsRestart(const int it){/*{{{*/
 		cerr << "Done Writing restart file " << id << endl;
 	#endif
 }/*}}}*/
+
+#ifdef USE_NETCDF
+int writeRestartFileOverwriteNC( const int it, const vector<pnt> &points ) {
+
+	// set up the file and create
+	static const int NC_ERR = 2;
+	NcError err(NcError::verbose_nonfatal);
+	NcFile grid("point_restart.nc", NcFile::Replace);
+	if(!grid.is_valid()) return NC_ERR;
+	
+	// define dimensions
+	NcDim *nPointsDim;
+	NcDim *itDim;
+	
+	// store dimensions
+	if (!(nPointsDim = grid.add_dim( "nPoints",	points.size() ))) return NC_ERR;
+	if (!(itDim = grid.add_dim( "it", it ))) return NC_ERR;
+		
+	// create/populate point arrays
+	double *xPoint, *yPoint, *zPoint;
+	xPoint = new double[nPointsDim->size()];
+	yPoint = new double[nPointsDim->size()];
+	zPoint = new double[nPointsDim->size()];
+	
+	for ( int ii = 0; ii < nPointsDim->size(); ii++ ) {
+		xPoint[ii] = points.at(ii).x;
+		yPoint[ii] = points.at(ii).y;
+		zPoint[ii] = points.at(ii).z;
+	}
+	
+	// define coordinate ncvars
+	NcVar *xPointVar, *yPointVar, *zPointVar;
+	if (!(xPointVar = grid.add_var("xPoint", ncDouble, nPointsDim))) return NC_ERR;
+	if (!(yPointVar = grid.add_var("yPoint", ncDouble, nPointsDim))) return NC_ERR;
+	if (!(zPointVar = grid.add_var("zPoint", ncDouble, nPointsDim))) return NC_ERR;
+	
+	// write coordinate data
+	if (!xPointVar->put(xPoint,nPointsDim->size())) return NC_ERR;
+	if (!yPointVar->put(yPoint,nPointsDim->size())) return NC_ERR;
+	if (!zPointVar->put(zPoint,nPointsDim->size())) return NC_ERR;
+	
+	// clear memory
+	delete xPoint;
+	delete yPoint;
+	delete zPoint;
+	
+	// scope closure destroys NC objs
+	return 0;
+	
+}
+
+int writeRestartFileRetainNC( const int it, const vector<pnt> &points ) {
+
+	// set up the file and create
+	static const int NC_ERR = 2;
+	NcError err(NcError::verbose_nonfatal);
+	std::ostringstream int_hole;
+	int_hole << it;
+	std::string restart_name = "point_restart_" + int_hole.str() + ".nc";
+	NcFile grid(restart_name.c_str(), NcFile::Replace);
+	if(!grid.is_valid()) return NC_ERR;
+
+	// define dimensions
+	NcDim *nPointsDim;
+	NcDim *itDim;
+	
+	// store dimensions
+	if (!(nPointsDim = grid.add_dim( "nPoints",	points.size() ))) return NC_ERR;
+	if (!(itDim = grid.add_dim( "it", it ))) return NC_ERR;
+		
+	// create/populate point arrays
+	double *xPoint, *yPoint, *zPoint;
+	xPoint = new double[nPointsDim->size()];
+	yPoint = new double[nPointsDim->size()];
+	zPoint = new double[nPointsDim->size()];
+	
+	for ( int ii = 0; ii < nPointsDim->size(); ii++ ) {
+		xPoint[ii] = points.at(ii).x;
+		yPoint[ii] = points.at(ii).y;
+		zPoint[ii] = points.at(ii).z;
+	}
+	
+	// define coordinate ncvars
+	NcVar *xPointVar, *yPointVar, *zPointVar;
+	if (!(xPointVar = grid.add_var("xPoint", ncDouble, nPointsDim))) return NC_ERR;
+	if (!(yPointVar = grid.add_var("yPoint", ncDouble, nPointsDim))) return NC_ERR;
+	if (!(zPointVar = grid.add_var("zPoint", ncDouble, nPointsDim))) return NC_ERR;
+	
+	// write coordinate data
+	if (!xPointVar->put(xPoint,nPointsDim->size())) return NC_ERR;
+	if (!yPointVar->put(yPoint,nPointsDim->size())) return NC_ERR;
+	if (!zPointVar->put(zPoint,nPointsDim->size())) return NC_ERR;
+	
+	// clear memory
+	delete xPoint;
+	delete yPoint;
+	delete zPoint;
+	
+	// scope closure destroys NC objs
+	return 0;
+
+}
+#endif
+
+int writeRestartFileOverwriteTXT( const int it ) {
+
+	char temp[32];
+	sprintf(temp,"point_restart.dat\0");
+
+	ofstream pts_out(temp);
+
+	for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
+		pts_out << (*point_itr) << endl;
+	}
+	
+	pts_out.close();
+	
+}
+
+int writeRestartFileRetainTXT( const int it ) {
+	
+	char temp[32];
+	sprintf(temp,"point_restart_%d.dat\0",it);
+
+	ofstream pts_out(temp);
+
+	for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
+		pts_out << (*point_itr) << endl;
+	}
+	
+	pts_out.close();
+
+}
+
 double density(const pnt &p){/*{{{*/
 	//density returns the value of the density function at point p
 	return 1.0; // Uniform density
@@ -2439,6 +3051,43 @@ double density(const pnt &p){/*{{{*/
 	r = cent.dotForAngle(p);
 
 	density = ((tanh((trans_cent-r)*(1.0/width))+1.0)/2.0)/norm + min_val;
+
+	return density;
+	// */
+	
+	// /* Ellipse density function.
+	
+	return ellipse_density(p, 40.0, 0.0, 1.0, 0.5);
+	// */
+
+}/*}}}*/
+double ellipse_density(const pnt &p, double lat_c, double lon_c, double lat_width, double lon_width){/*{{{*/
+	//density returns the value of the density function at point p
+	//	return 1.0; // Uniform density
+	//	/* Ellipse Density function
+	pnt work;
+	double r1, r2, r;
+	double dtr;
+	double width, trans_cent, min_val, norm, density;
+
+	dtr = M_PI/180.0;
+
+	work = pntFromLatLon(p.getLat(), lon_c*dtr);
+	r1 = work.dotForAngle(p);
+
+	work = pntFromLatLon(lat_c*dtr, p.getLon());
+	r2 = work.dotForAngle(p);
+
+	r1 = r1/lon_width;
+	r2 = r2/lat_width;
+	r = sqrt (r1*r1 + r2*r2);
+
+	width = 0.15;
+	trans_cent = 30.0 * dtr;
+	min_val = 1.0/12.0;
+	min_val = pow(min_val,4);
+	norm = 1.0/(1.0-min_val);
+	density = ((tanh((trans_cent-r)*(1.0/width))+1.0)/2)/norm + min_val;
 
 	return density;
 	// */
