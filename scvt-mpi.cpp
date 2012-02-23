@@ -240,7 +240,6 @@ void readParamsFile();
 void buildRegions();
 void printRegions();
 void readBoundaries();
-void readBoundariesV2();
 /*}}}*/
 /* ***** Bisect Edges Routines *****{{{*/
 void bisectEdges(int end);
@@ -271,7 +270,6 @@ void computeMetrics(double &ave, double &max, double &l1);
 void clearRegions(vector<region> &region_vec);
 void makeFinalTriangulations(vector<region> &region_vec);
 void projectToBoundary(vector<region> &region_vec);
-void projectToBoundary2(vector<region> &region_vec);
 /*}}}*/
 /* ***** Specific Region Routines ***** {{{ */
 void printAllFinalTriangulation();
@@ -342,8 +340,7 @@ int main(int argc, char **argv){
 			cout << "Points being created with Generalized Spiral." << endl;
 			makeGeneralizedSpiralPoints(num_pts);
 		}
-		//readBoundaries();
-		readBoundariesV2();
+		readBoundaries();
 		buildRegions();
 
 		ofstream pts_out("point_initial.dat");
@@ -409,8 +406,6 @@ int main(int argc, char **argv){
 		stop = 0;
 		do_proj = 1;
 		for(it = 0; it < max_it && !stop; it++){
-
-			proj_alpha = max(it-max_it_no_proj, 0)/max_it_scale_alpha;
 			glob_ave = 0.0;
 			glob_max = 0.0;
 			glob_l1 = 0.0;
@@ -442,6 +437,7 @@ int main(int argc, char **argv){
 			my_timers[3].stop();
 
 			if(it > max_it_no_proj){
+				proj_alpha = max((double)(it-max_it_no_proj), 0.0)/max((double)max_it_scale_alpha, 1.0);
 				projectToBoundary(my_regions);
 			}
 
@@ -621,11 +617,11 @@ void readParamsFile(){/*{{{*/
 		pout << "162" << endl;
 		pout << "How many iterations do you want to run for, if convergence isn't reached?" << endl;
 		pout << "1000" << endl;
+		pout << "How often, in iterations, do you want the point set written to a file? (Longer is better)" << endl << 500 << endl;
 		pout << "How many iterations do you want to run without projection onto the boundary?" << endl;
 		pout << "10000" << endl;
 		pout << "How many iterations do you want with a variable projection distance? (Minimum of 1)" << endl;
 		pout << "0" << endl;
-		pout << "How often, in iterations, do you want the point set written to a file? (Longer is better)" << endl << 500 << endl;
 		pout << "How many sub-triangle divisions would you like? (Minimum of 1, Causes every triangle to be divided into 4^n triangles)" << endl;
 		pout << "1" << endl;
 		pout << "How many bisections do you want until your final point set? (Each bisection maps n -> 4*n-6)" << endl;
@@ -731,66 +727,6 @@ void readParamsFile(){/*{{{*/
 	params.close();
 }/*}}}*/
 void readBoundaries(){/*{{{*/
-	int i, j, n_pts;
-	pnt p;
-	pnt p_b, p_e;
-	double dist;
-	double dlat, dlon;
-	double lat, lon;
-	double lat_b, lon_b, lat_e, lon_e;
-	double dtr;
-	ifstream bdry_in("SaveBoundaries");
-	
-	dtr = M_PI/180.0;
-
-	j = 0;
-
-	while(!bdry_in.eof()){
-		bdry_in >> lat_b >> lon_b;
-		bdry_in.ignore(10000,'\n');
-
-		bdry_in >> lat_e >> lon_e;
-		bdry_in.ignore(10000,'\n');
-
-		if(bdry_in.good()){
-			lat_b = lat_b * dtr;
-			lon_b = lon_b * dtr;
-			lat_e = lat_e * dtr;
-			lon_e = lon_e * dtr;
-
-			p_b = pntFromLatLon(lat_b, lon_b);
-			p_e = pntFromLatLon(lat_e, lon_e);
-
-			dist = p_b.dotForAngle(p_e);
-			n_pts = dist/min_bdry_angle;
-
-			p = p_b;
-
-			dlat = (lat_e - lat_b)/n_pts;
-			dlon = (lon_e - lon_b)/n_pts;
-
-			for(i = 0; i < n_pts; i++){
-				p = pntFromLatLon(lat_b + dlat*i, lon_b + dlon*i);
-
-				p.normalize();
-				p.idx = j;
-				p.isBdry = 0;
-
-				j++;
-				boundary_points.push_back(p);
-			}
-		}
-	}
-
-	bdry_in.close();
-
-
-	cout << "Made " << boundary_points.size() << " boundary points." << endl;
-
-	num_bdry = boundary_points.size(); 
-
-}/*}}}*/
-void readBoundariesV2(){/*{{{*/
 	int i, j, n_pts;
 	int count_count, bdry_count, fill_count, bdry_total;
 	int add_count;

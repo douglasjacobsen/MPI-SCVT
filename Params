@@ -3,13 +3,13 @@ How do you want the points created? (0 - Read from SaveVertices.dat, 1 - Monte C
 If you want them generated, how many points do you want?
 162
 How many iterations do you want to run for, if convergence isn't reached?
-1000
-How many iterations do you want to run without projection onto the boundary?
-10000
-How many iterations do you want with a variable projection distance? (Minimum of 1)
-0
+100
 How often, in iterations, do you want the point set written to a file? (Longer is better)
 500
+How many iterations do you want to run without projection onto the boundary?
+100
+How many iterations do you want with a variable projection distance?
+100
 How many sub-triangle divisions would you like? (Minimum of 1, Causes every triangle to be divided into 4^n triangles)
 1
 How many bisections do you want until your final point set? (Each bisection maps n -> 4*n-6)
