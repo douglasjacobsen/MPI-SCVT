@@ -743,10 +743,8 @@ void readBoundaries(){/*{{{*/
 	double c0, c1;
 	double t, omega;
 	double r_earth = 6371.0; //avg radius in km
-// 	double max_resolution = 4.0; // max spacing between boundary points allowed in km
 	
 	// gw: read boundary points file
-// 	cout << "Boundary read begin." << endl;
 	bdry_count = 0;
 	ifstream bdry_in("SaveBoundaries");
 	while(!bdry_in.eof()){
@@ -768,10 +766,8 @@ void readBoundaries(){/*{{{*/
 			
 	} // end while not eof
 	bdry_in.close();
-// 	cout << "Boundary read end." << endl;
-	
+
 	// gw: read loop counts file
-// 	cout << "Count read begin." << endl;
 	count_count = 0;
 	ifstream count_in("SaveLoopCounts");
 	while(!count_in.eof()){
@@ -781,30 +777,20 @@ void readBoundaries(){/*{{{*/
 		if(count_in.good()){
 			loop_start.push_back(count_start);
 			loop_stop.push_back(count_stop);
-// 			cout << " count_count " << count_count << " count_start " << count_start;
-// 			cout << " count_stop " << count_stop << " loop_start.at(" << count_count;
-// 			cout << ") " << loop_start.at(count_count) << " loop_stop.at(" << count_count;
-// 			cout << ") " << loop_stop.at(count_count) << endl;
 			count_count++;
 			
 		} // end if input good
 	} // end while not eof
 	count_in.close();
-// 	cout << "Count read end." << endl;
-	
 	// gw: loop over loops
 	fill_count = 0;
 	for(int cur_loop = 0; cur_loop < count_count; cur_loop++){
-// 		cout << "checking loop " << cur_loop << " of " << count_count << endl;
-		
 		cur_loop_start = loop_start.at(cur_loop) - 1;
         cur_loop_length = loop_stop.at(cur_loop) - cur_loop_start;
 	
 		// gw: loop over point pairs in current loop
 		for(int cur_pair = 0; cur_pair < cur_loop_length; cur_pair++){
 		
-// 			cout << "checking pair " << cur_pair << " of " << cur_loop_length << endl;
-            
             p0_idx = cur_loop_start + cur_pair;
             p1_idx = cur_loop_start + (cur_pair+1)%cur_loop_length;
             pnt p0 = boundary_points.at(p0_idx);
@@ -813,16 +799,12 @@ void readBoundaries(){/*{{{*/
             
 			// gw: if distance between pair is greater than allowed amount
 			//     then add some additional points
-// 			cout << "point delta * r_earth " << (point_delta*r_earth);
-// 			cout << " max_resolution " << max_resolution << endl;
 			if ( (point_delta * r_earth) > max_resolution ) {
 			
 				// gw: figure out how many points to added
 				add_count = (int)ceil( (point_delta * r_earth) ) / max_resolution;
                 add_spacing = 1.0 / ((double)add_count + 1);
 				denom = sin( point_delta );
-//                 cout << "adding " << add_count << " points, with ";
-//                 cout << point_delta*add_spacing*r_earth << "km spacing" << endl;
 			
 				// gw: loop for adding point(s)
 				for(int cur_add = 0; cur_add < add_count; cur_add++){
@@ -833,8 +815,6 @@ void readBoundaries(){/*{{{*/
 					c1 = sin( t * point_delta ) / denom;
 					pnt temp_point = c0 * p0 + c1 * p1;
 					temp_point.normalize();
-// 					cout << "point " << cur_add << ", distance covered ";
-// 					cout << temp_point.dotForAngle(p0)*r_earth << "km" << endl;
 					temp_point.idx = bdry_count + fill_count;
 					boundary_points.push_back(temp_point);
 					
@@ -849,7 +829,6 @@ void readBoundaries(){/*{{{*/
 	cout << "Read in " << bdry_count << " boundary points." << endl;
 	cout << "Made " << fill_count << " fill points." << endl;
 	cout << "There are " << boundary_points.size() << " boundary points total." << endl;
-	//cout << "Made " << boundary_points.size() << " boundary points." << endl;
 
 	num_bdry = boundary_points.size(); 
 
