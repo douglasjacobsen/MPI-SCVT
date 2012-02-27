@@ -805,15 +805,23 @@ void readBoundaries(){/*{{{*/
 				add_count = (int)ceil( (point_delta * r_earth) ) / max_resolution;
                 add_spacing = 1.0 / ((double)add_count + 1);
 				denom = sin( point_delta );
+				bdry_lat = p1.getLat() - p0.getLat();
+				bdry_lon = p1.getLon() - p0.getLon();
 			
 				// gw: loop for adding point(s)
-				for(int cur_add = 0; cur_add < add_count; cur_add++){
+				for(int cur_add = 0; cur_add <= add_count; cur_add++){
 					
+					/* Slerp - Doesn't work for constant lat, lon curves
 					// http://en.wikipedia.org/wiki/Slerp
 					t = add_spacing * ( (double)cur_add + 1 );
 					c0 = sin( (1.0 - t) * point_delta ) / denom;
 					c1 = sin( t * point_delta ) / denom;
-					pnt temp_point = c0 * p0 + c1 * p1;
+					pnt temp_point = c0 * p0 + c1 * p1; // */
+
+					// Linear interpolation, using Lat Lon.
+					pnt temp_point = pntFromLatLon( p0.getLat() + cur_add * add_spacing * bdry_lat, 
+							                        p0.getLon() + cur_add * add_spacing * bdry_lon);
+
 					temp_point.normalize();
 					temp_point.idx = bdry_count + fill_count;
 					boundary_points.push_back(temp_point);
