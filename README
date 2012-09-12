@@ -58,12 +58,13 @@ Input:
 		with one point per line. This is required if the method of generating points is set to 0 in Params.
 
 	SaveBoundaries: (Optional)
-		This file lists line segments that make up boundaries on the sphere.
-		These boundaries will have cell centers projected onto them based on
-		parameters present in the Params file. These boundary points are given
-		as lat-lon coordinates in degrees. Each line is one point, and every
-		pair of lines is a line segment. The line segments are not assumed to
-		be a continuous loop.
+		This file lists all points which lie along some boundary segment or segments. Generator points can
+		be projected onto these segments during generation, but do not have to be.
+
+	SaveLoopCounts: (Optional)
+		This file defines the continous segements of boundary lines. The first
+		column is a beginning index, and the second column is the number of
+		points to read from SaveBoundaries to create a loop.
 
 Output:
 	After a successful run of MPI-SCVT, Three files are created.
