@@ -2166,7 +2166,6 @@ void computeMetrics(double &ave, double &max, double &l1){/*{{{*/
 	for(point_itr = n_points.begin(); point_itr != n_points.end(); ++point_itr){
 		norm_pt = points.at((*point_itr).idx) - (*point_itr);
 		val = norm_pt.magnitude();
-		val = points.at((*point_itr).idx).dotForAngle((*point_itr));
 
 		ave += val*val;
 		max = std::max(val,max);
