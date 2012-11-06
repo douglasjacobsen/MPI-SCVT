@@ -747,6 +747,9 @@ void readBoundaries(){/*{{{*/
 	// gw: read boundary points file
 	bdry_count = 0;
 	ifstream bdry_in("SaveBoundaries");
+	if(!bdry_in)
+		return;
+
 	while(!bdry_in.eof()){
 		bdry_in >> bdry_lon >> bdry_lat;
 		bdry_in.ignore(10000,'\n');
@@ -770,6 +773,9 @@ void readBoundaries(){/*{{{*/
 	// gw: read loop counts file
 	count_count = 0;
 	ifstream count_in("SaveLoopCounts");
+	if(!count_in)
+		return;
+
 	while(!count_in.eof()){
 		count_in >> count_start >> count_stop;
 		count_in.ignore(10000,'\n');
