@@ -1763,7 +1763,7 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 #endif
 	if(sort_type == sort_dot){
 		//Simple Dot Product Sort using the radius based decomposition.
-		for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
+		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
 			(*region_itr).radius = (*region_itr).input_radius;
 			for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
 				val = (*point_itr).dotForAngle((*region_itr).center);	
