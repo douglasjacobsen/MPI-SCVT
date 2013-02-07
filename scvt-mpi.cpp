@@ -1802,15 +1802,18 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 					}
 
 					added = 0;
+
+					if(min_region == (*region_itr).center.idx){
+						(*region_itr).points.push_back((*point_itr));
+						added = 1;
+					}
 					for(neighbor_itr = (*region_itr).neighbors1.begin(); 
 							neighbor_itr != (*region_itr).neighbors1.end() && added == 0; 
 							++neighbor_itr){
 						if(min_region == (*neighbor_itr)){
 							val = (*region_itr).center.dotForAngle(regions[min_region].center);
 
-							if(min_region == (*region_itr).center.idx){
-								(*region_itr).points.push_back((*point_itr));
-							} else if(my_val < val) {
+							if(my_val < val) {
 								(*region_itr).points.push_back((*point_itr));
 							}
 
