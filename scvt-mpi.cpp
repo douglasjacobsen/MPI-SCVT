@@ -2826,7 +2826,7 @@ void writePointsAsRestart(const int it, const restart_mode_type restart_mode, co
 }/*}}}*/
 
 #ifdef USE_NETCDF
-int writeRestartFileOverwriteNC( const int it, const vector<pnt> &points ) {
+int writeRestartFileOverwriteNC( const int it, const vector<pnt> &points ) {/*{{{*/
 
 	// set up the file and create
 	static const int NC_ERR = 2;
@@ -2873,9 +2873,8 @@ int writeRestartFileOverwriteNC( const int it, const vector<pnt> &points ) {
 	// scope closure destroys NC objs
 	return 0;
 	
-}
-
-int writeRestartFileRetainNC( const int it, const vector<pnt> &points ) {
+}/*}}}*/
+int writeRestartFileRetainNC( const int it, const vector<pnt> &points ) {/*{{{*/
 
 	// set up the file and create
 	static const int NC_ERR = 2;
@@ -2925,10 +2924,10 @@ int writeRestartFileRetainNC( const int it, const vector<pnt> &points ) {
 	// scope closure destroys NC objs
 	return 0;
 
-}
+}/*}}}*/
 #endif
 
-int writeRestartFileOverwriteTXT( const int it ) {
+int writeRestartFileOverwriteTXT( const int it ) {/*{{{*/
 
 	char temp[32];
 	sprintf(temp,"point_restart.dat\0");
@@ -2941,9 +2940,8 @@ int writeRestartFileOverwriteTXT( const int it ) {
 	
 	pts_out.close();
 	
-}
-
-int writeRestartFileRetainTXT( const int it ) {
+}/*}}}*/
+int writeRestartFileRetainTXT( const int it ) {/*{{{*/
 	
 	char temp[32];
 	sprintf(temp,"point_restart_%d.dat\0",it);
@@ -2956,7 +2954,7 @@ int writeRestartFileRetainTXT( const int it ) {
 	
 	pts_out.close();
 
-}
+}/*}}}*/
 
 double density(const pnt &p){/*{{{*/
 	//density returns the value of the density function at point p
