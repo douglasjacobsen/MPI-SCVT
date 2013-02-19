@@ -357,6 +357,7 @@ int main(int argc, char **argv){
 	mpi::broadcast(world,num_pts,master);
 	mpi::broadcast(world,max_it,master);
 	mpi::broadcast(world,restart,master);
+	mpi::broadcast(world,sort_method,master);
 	mpi::broadcast(world,max_it_no_proj,master);
 	mpi::broadcast(world,max_it_scale_alpha,master);
 	mpi::broadcast(world,num_bisections,master);
