@@ -249,6 +249,7 @@ void bisectTriangulation(int output);
 void readPoints();
 void makeMCPoints(int n);
 void makeGeneralizedSpiralPoints(int n);
+void makeFibonacciGridPoints(int n);
 /*}}}*/
 /* ***** Integration Routines ***** {{{*/
 void divideIntegrate(const int levs, const pnt &A, const pnt &B, const pnt &C, pnt &Top, double &bot);
@@ -339,6 +340,9 @@ int main(int argc, char **argv){
 		} else if(points_begin == 2){
 			cout << "Points being created with Generalized Spiral." << endl;
 			makeGeneralizedSpiralPoints(num_pts);
+		} else if(points_begin == 3){
+			cout << "Points being created with Fibonacci Grid." << endl;
+			makeFibonacciGridPoints(num_pts);
 		}
 		readBoundaries();
 		buildRegions();
@@ -612,7 +616,7 @@ void readParamsFile(){/*{{{*/
 		cout << "Writing a default Params file." << endl;
 		cout << "Exiting, please set up Params, and rerun." << endl;
 		ofstream pout("Params");
-		pout << "How do you want the points created? (0 - Read from SaveVertices.dat, 1 - Monte Carlo, 2 - Generalized Spiral)" << endl;
+		pout << "How do you want the points created? (0 - Read from SaveVertices.dat, 1 - Monte Carlo, 2 - Generalized Spiral, 3 - Fibonacci Grid Points)" << endl;
 		pout << "0" << endl;
 		pout << "If you want them generated, how many points do you want?" << endl;
 		pout << "162" << endl;
@@ -1363,6 +1367,30 @@ void makeGeneralizedSpiralPoints(int n){/*{{{*/
 	points.push_back(p);
 
 	cout << "Created " << points.size() << " points using generalized spiral." << endl;
+}/*}}}*/
+void makeFibonacciGridPoints(int n){/*{{{*/
+	const double g_ratio = (1.0+sqrt(5)) / 2.0;
+	double lambda, phi, sinphi, x, y, z;
+	int i, j, m;
+	pnt p;
+
+	m = n/2;
+
+	for (i = 0; i < n; i++){
+		j = i - m;
+
+		lambda = i / g_ratio;
+		sinphi = (2.0*j) / (n + 1);
+		phi = asin(sinphi);
+		x = cos(phi) * sin(lambda);
+		y = cos(phi) * cos(lambda);
+		z = sin(phi);
+		p = pntFromLatLon(phi, lambda);
+		p.idx = i;
+		p.isBdry = 0;
+		p.normalize();
+		points.push_back(p);
+	}
 }/*}}}*/
 /*}}}*/
 /* ***** Integration Routines *****  {{{*/
