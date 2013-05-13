@@ -563,8 +563,7 @@ int main(int argc, char **argv){
 	// write triangles to triangles.dat
 	global_timers[2].start(); // Final Triangulation Timer
 	clearRegions(my_regions);
-	sortPoints(sort_dot, my_regions);
-	triangulateRegions(my_regions);
+	sortPoints(sort_vor, my_regions);
 	makeFinalTriangulations(my_regions);
 	printMyFinalTriangulation();
 	global_timers[2].stop();
@@ -2326,28 +2325,18 @@ void makeFinalTriangulations(vector<region> &region_vec){/*{{{*/
 			criteria += cradius;
 
 			if(criteria < (*region_itr).radius){
-				a_dist = a.dotForAngle((*region_itr).center);
-				b_dist = b.dotForAngle((*region_itr).center);
-				c_dist = c.dotForAngle((*region_itr).center);
+                c_dist = ccenter.dotForAngle((*region_itr).center);
+                c_dist_min = 10.0;
 
-				a_dist_min = 10;
-				b_dist_min = 10;
-				c_dist_min = 10;
+                for(neighbor_itr = (*region_itr).neighbors.begin(); neighbor_itr != (*region_itr).neighbors.end(); ++neighbor_itr){
+                    dist_temp = ccenter.dotForAngle(regions.at((*neighbor_itr)).center);
+                    c_dist_min = min(c_dist_min, dist_temp);
+                }
 
-				for(neighbor_itr = (*region_itr).neighbors.begin(); neighbor_itr != (*region_itr).neighbors.end(); ++neighbor_itr){
-					dist_temp = a.dotForAngle(regions.at((*neighbor_itr)).center);
-					a_dist_min = min(a_dist_min,dist_temp);
-					dist_temp = b.dotForAngle(regions.at((*neighbor_itr)).center);
-					b_dist_min = min(b_dist_min,dist_temp);
-					dist_temp = c.dotForAngle(regions.at((*neighbor_itr)).center);
-					c_dist_min = min(c_dist_min,dist_temp);
-				}
-
-				if((a_dist < a_dist_min) || (b_dist < b_dist_min) || (c_dist < c_dist_min)){
+                if(c_dist <= c_dist_min){
 					t = tri(vi1, vi2, vi3);
-					t = t.sortedTri();
 					(*region_itr).triangles.push_back(t);
-				}
+                }
 			}
 		}
 		free(in.pointlist);
@@ -2623,51 +2612,75 @@ void storeMyFinalTriangulation(){/*{{{*/
 	mpi::request mycomm;
 	vector<tri> temp_tris_out;
 	vector<tri> temp_tris_in;
-	unordered_set<tri, tri::hasher> unique_tris;
-	unordered_set<tri, tri::hasher>::iterator utri_itr;
 	tri t;
 
 	#ifdef _DEBUG
 		cerr << " Store my final triangulation " << id << endl;
 	#endif
 
-	for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
-		for(tri_itr = (*region_itr).triangles.begin(); tri_itr != (*region_itr).triangles.end(); ++tri_itr){
-			temp_tris_out.push_back((*tri_itr));
-			unique_tris.insert((*tri_itr).sortedTri());
-		}
-	}
+    all_triangles.clear();
+
+    if(id == master){
+        temp_tris_in.clear();
+        for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
+            for(tri_itr = (*region_itr).triangles.begin(); tri_itr != (*region_itr).triangles.end(); ++tri_itr){
+                t = (*tri_itr);
+
+/*                if(!isCcw(points.at(t.vi1),points.at(t.vi2),points.at(t.vi3))){
+                    int swp_v;
+
+                    swp_v = t.vi2;
+                    t.vi2 = t.vi3;
+                    t.vi3 = swp_v;
+                }*/
+
+                all_triangles.push_back(t);
+            }
+        }
+    } else {
+        for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
+            for(tri_itr = (*region_itr).triangles.begin(); tri_itr != (*region_itr).triangles.end(); ++tri_itr){
+                t = (*tri_itr);
+
+/*              if(!isCcw(points.at(t.vi1),points.at(t.vi2),points.at(t.vi3))){
+                    int swp_v;
+
+                    swp_v = t.vi2;
+                    t.vi2 = t.vi3;
+                    t.vi3 = swp_v;
+                }*/
+                temp_tris_out.push_back(t);
+            }
+        }
+    }
 
 	for(int i = 1; i < num_procs; i++){
 		if(id == i){
 			mycomm = world.isend(master,i,temp_tris_out);	
 		} else if (id == master){
 			world.recv(i, i, temp_tris_in);
-			
-			for(tri_itr = temp_tris_in.begin(); tri_itr != temp_tris_in.end(); ++tri_itr){
-				unique_tris.insert((*tri_itr).sortedTri());
-			}
+
+            for(tri_itr = temp_tris_in.begin(); tri_itr != temp_tris_in.end(); ++tri_itr){
+                t = (*tri_itr);
+
+/*              if(!isCcw(points.at(t.vi1),points.at(t.vi2),points.at(t.vi3))){
+                    int swp_v;
+
+                    swp_v = t.vi2;
+                    t.vi2 = t.vi3;
+                    t.vi3 = swp_v;
+                }*/
+
+                all_triangles.push_back(t);               
+            }
+
+            temp_tris_in.clear();
 		}
 	}
 
 	if(id != master){
 		mycomm.wait();
 		temp_tris_out.clear();
-	} else {
-
-		all_triangles.clear();
-		for(utri_itr = unique_tris.begin(); utri_itr != unique_tris.end(); ++utri_itr){
-			t = (*utri_itr);
-
-			if(!isCcw(points.at(t.vi1),points.at(t.vi2),points.at(t.vi3))){
-				int swp_v;
-
-				swp_v = t.vi2;
-				t.vi2 = t.vi3;
-				t.vi3 = swp_v;
-			}
-			all_triangles.push_back(t);
-		}
 	}
 
 	#ifdef _DEBUG
