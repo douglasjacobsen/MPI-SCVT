@@ -1,0 +1,8 @@
+# Ignore .dat files.
+*.dat
+
+# Ignore object files.
+*.o
+
+# Ignore Executable
+MpiScvt.x
