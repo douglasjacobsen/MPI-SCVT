@@ -423,15 +423,16 @@ int main(int argc, char **argv){
 
 			clearRegions(my_regions);
 
-			my_timers[2].start(); // Triangulation Timer
-
 			my_timers[7].start(); // Sort Timer
 
 			sortPoints(sort_method, my_regions);
 
 			my_timers[7].stop(); // Sort Timer
 
+			my_timers[2].start(); // Triangulation Timer
+
 			triangulateRegions(my_regions);
+			//makeFinalTriangulations(my_regions);
 
 			my_timers[2].stop();
 
@@ -1987,17 +1988,8 @@ void triangulateRegions(vector<region> &region_vec){/*{{{*/
 			vi2 = b.idx;
 			vi3 = c.idx;
 
-			circumcenter(a,b,c,ccenter);
-			ccenter.normalize();
-			cradius = circumradius(a, b, c);
-
-			criteria = (*region_itr).center.dotForAngle(ccenter);
-			criteria += cradius;
-
-			if(criteria < (*region_itr).radius){
-				t = tri(vi1, vi2, vi3);
-				(*region_itr).triangles.push_back(t);
-			}
+			t = tri(vi1, vi2, vi3);
+			(*region_itr).triangles.push_back(t);
 		}
 		free(in.pointlist);
 		free(in.regionlist);
@@ -2319,25 +2311,21 @@ void makeFinalTriangulations(vector<region> &region_vec){/*{{{*/
 
 			circumcenter(a,b,c,ccenter);
 			ccenter.normalize();
-			cradius = circumradius(a, b, c);
 
-			criteria = (*region_itr).center.dotForAngle(ccenter);
-			criteria += cradius;
+            c_dist = ccenter.dotForAngle((*region_itr).center);
+            c_dist_min = 10.0;
 
-			if(criteria < (*region_itr).radius){
-                c_dist = ccenter.dotForAngle((*region_itr).center);
-                c_dist_min = 10.0;
-
-                for(neighbor_itr = (*region_itr).neighbors.begin(); neighbor_itr != (*region_itr).neighbors.end(); ++neighbor_itr){
+            for(neighbor_itr = (*region_itr).neighbors.begin(); neighbor_itr != (*region_itr).neighbors.end(); ++neighbor_itr){
+                if((*neighbor_itr) != (*region_itr).center.idx){
                     dist_temp = ccenter.dotForAngle(regions.at((*neighbor_itr)).center);
                     c_dist_min = min(c_dist_min, dist_temp);
                 }
+            }
 
-                if(c_dist <= c_dist_min){
-					t = tri(vi1, vi2, vi3);
-					(*region_itr).triangles.push_back(t);
-                }
-			}
+            if(c_dist < c_dist_min){
+				t = tri(vi1, vi2, vi3);
+				(*region_itr).triangles.push_back(t);
+            }
 		}
 		free(in.pointlist);
 		free(in.regionlist);
