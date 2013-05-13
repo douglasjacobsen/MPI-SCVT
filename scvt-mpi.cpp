@@ -535,6 +535,8 @@ int main(int argc, char **argv){
 		}
 	}
 
+	global_timers[0].stop();
+
 	//Compute average points per region for diagnostics
 	ave_points = 0;
 	my_points = 0;
@@ -553,7 +555,6 @@ int main(int argc, char **argv){
 		cout << endl;
 	}
 
-	global_timers[0].stop();
 	//Gather all updated points onto master processor, for printing to end_points.dat
 	global_timers[1].start(); // Global Gather Timer
 	gatherAllUpdatedPoints();
@@ -566,8 +567,9 @@ int main(int argc, char **argv){
 	clearRegions(my_regions);
 	sortPoints(sort_vor, my_regions);
 	makeFinalTriangulations(my_regions);
-	printMyFinalTriangulation();
 	global_timers[2].stop();
+
+	printMyFinalTriangulation();
 
 	if(id == master){
 		ofstream end_pts("end_points.dat");
@@ -2490,67 +2492,6 @@ void printAllFinalTriangulation(){/*{{{*/
 	}
 	utris_out.close();
 }/*}}}*/
-void printMyFinalTriangulation_t(){/*{{{*/
-	//Merge all finalTriangulations made with makeFinalTriangulations onto master processor.
-	//Master processor inserts all triangles into an unordered_set to create a list of unique triangles
-	//Triangles are then written into a file triangles.dat in ccw order
-	mpi::request mycomm;
-	vector<tri> temp_tris_out;
-	vector<tri> temp_tris_in;
-	unordered_set<tri, tri::hasher> unique_tris;
-	unordered_set<tri, tri::hasher>::iterator utri_itr;
-	tri t;
-
-	#ifdef _DEBUG
-		cerr << " Print my final triangulation " << id << endl;
-	#endif
-	for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
-		for(tri_itr = (*region_itr).triangles.begin(); tri_itr != (*region_itr).triangles.end(); ++tri_itr){
-			temp_tris_out.push_back((*tri_itr));
-			unique_tris.insert((*tri_itr).sortedTri());
-		}
-	}
-
-	for(int i = 1; i < num_procs; i++){
-		if(id == i){
-			mycomm = world.isend(master,msg_tri_print,temp_tris_out);	
-		} else if (id == master){
-			temp_tris_in.clear();
-			world.recv(i, msg_tri_print, temp_tris_in);
-			
-			for(tri_itr = temp_tris_in.begin(); tri_itr != temp_tris_in.end(); ++tri_itr){
-				unique_tris.insert((*tri_itr).sortedTri());
-			}
-		}
-	}
-
-	if(id != master){
-		mycomm.wait();
-		temp_tris_out.clear();
-	} else {
-		ofstream utris_out("triangles.dat");
-
-		for(utri_itr = unique_tris.begin(); utri_itr != unique_tris.end(); ++utri_itr){
-			t = (*utri_itr);
-
-			if(!isCcw(points.at(t.vi1),points.at(t.vi2),points.at(t.vi3))){
-				int swp_v;
-
-				swp_v = t.vi2;
-				t.vi2 = t.vi3;
-				t.vi3 = swp_v;
-			}
-//			utris_out << (*utri_itr) << endl;
-			utris_out << t << endl;
-		}
-
-		utris_out.close();
-	}
-
-	#ifdef _DEBUG
-		cerr << " Print my final triangulation done " << id << endl;
-	#endif
-}/*}}}*/
 void printMyFinalTriangulation(){/*{{{*/
 	//Merge all finalTriangulations made with makeFinalTriangulations onto master processor.
 	//Master processor inserts all triangles into an unordered_set to create a list of unique triangles
@@ -2573,14 +2514,6 @@ void printMyFinalTriangulation(){/*{{{*/
 
 		for(tri_itr = all_triangles.begin(); tri_itr != all_triangles.end(); ++tri_itr){
 			t = (*tri_itr);
-
-			if(!isCcw(points.at(t.vi1),points.at(t.vi2),points.at(t.vi3))){
-				int swp_v;
-
-				swp_v = t.vi2;
-				t.vi2 = t.vi3;
-				t.vi3 = swp_v;
-			}
 			tris_out << t << endl;
 		}
 
@@ -2614,14 +2547,6 @@ void storeMyFinalTriangulation(){/*{{{*/
             for(tri_itr = (*region_itr).triangles.begin(); tri_itr != (*region_itr).triangles.end(); ++tri_itr){
                 t = (*tri_itr);
 
-/*                if(!isCcw(points.at(t.vi1),points.at(t.vi2),points.at(t.vi3))){
-                    int swp_v;
-
-                    swp_v = t.vi2;
-                    t.vi2 = t.vi3;
-                    t.vi3 = swp_v;
-                }*/
-
                 all_triangles.push_back(t);
             }
         }
@@ -2630,13 +2555,6 @@ void storeMyFinalTriangulation(){/*{{{*/
             for(tri_itr = (*region_itr).triangles.begin(); tri_itr != (*region_itr).triangles.end(); ++tri_itr){
                 t = (*tri_itr);
 
-/*              if(!isCcw(points.at(t.vi1),points.at(t.vi2),points.at(t.vi3))){
-                    int swp_v;
-
-                    swp_v = t.vi2;
-                    t.vi2 = t.vi3;
-                    t.vi3 = swp_v;
-                }*/
                 temp_tris_out.push_back(t);
             }
         }
@@ -2650,14 +2568,6 @@ void storeMyFinalTriangulation(){/*{{{*/
 
             for(tri_itr = temp_tris_in.begin(); tri_itr != temp_tris_in.end(); ++tri_itr){
                 t = (*tri_itr);
-
-/*              if(!isCcw(points.at(t.vi1),points.at(t.vi2),points.at(t.vi3))){
-                    int swp_v;
-
-                    swp_v = t.vi2;
-                    t.vi2 = t.vi3;
-                    t.vi3 = swp_v;
-                }*/
 
                 all_triangles.push_back(t);               
             }
