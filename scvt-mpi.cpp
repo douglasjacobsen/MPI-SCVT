@@ -95,6 +95,8 @@ class region{/*{{{*/
 		pnt center;
 		double radius;
 		double input_radius;
+		double ave_circumradius;
+		double max_circumradius;
 		vector<pnt> points;
 		vector<tri> triangles;
 		vector<int> neighbors; // First Level of Neighbors
@@ -180,7 +182,11 @@ int num_bisections = 0;
 int conv = 0;
 int restart = 0;
 int sort_method = sort_dot;
-double sort_distance = 1.0;
+int sort_max_radius_include = 5;
+int sort_min_radius_include = 1;
+int sort_max_radius_iterations = 100;
+int sort_radius_include = sort_max_radius_include;
+double sort_distance = 0.5;
 double min_bdry_angle = 1.0;
 double eps = 1.0E-10;
 double proj_alpha;
@@ -268,6 +274,7 @@ void sortPoints(int sort_type, vector<region> &region_vec);
 void sortBoundaryPoints(vector<region> &region_vec);
 void triangulateRegions(vector<region> &region_vec);
 void integrateRegions(vector<region> &region_vec);
+void computeCircumRadiusStatistics(vector<region> &region_vec);
 void computeMetrics(double &ave, double &max, double &l1);
 void clearRegions(vector<region> &region_vec);
 void makeFinalTriangulations(vector<region> &region_vec);
@@ -363,6 +370,9 @@ int main(int argc, char **argv){
 	mpi::broadcast(world,max_it,master);
 	mpi::broadcast(world,restart,master);
 	mpi::broadcast(world,sort_method,master);
+	mpi::broadcast(world,sort_max_radius_include,master);
+	mpi::broadcast(world,sort_min_radius_include,master);
+	mpi::broadcast(world,sort_max_radius_iterations,master);
 	mpi::broadcast(world,sort_distance,master);
 	mpi::broadcast(world,max_it_no_proj,master);
 	mpi::broadcast(world,max_it_scale_alpha,master);
@@ -400,6 +410,11 @@ int main(int argc, char **argv){
 
 	sortBoundaryPoints(my_regions);
 
+	// Compute initial radius info.
+	sortPoints(sort_in_vor, my_regions);
+	triangulateRegions(my_regions);
+	computeCircumRadiusStatistics(my_regions);
+
 	// Loop over bisections
 	for(bisection = 0; bisection <= num_bisections; bisection++){
 		// Clear loop timers
@@ -413,6 +428,12 @@ int main(int argc, char **argv){
 		stop = 0;
 		do_proj = 1;
 		for(it = 0; it < max_it && !stop; it++){
+			if(it > sort_max_radius_iterations){
+				sort_radius_include = sort_min_radius_include;
+			} else {
+				sort_radius_include = sort_max_radius_include;
+			}
+			
 			glob_ave = 0.0;
 			glob_max = 0.0;
 			glob_l1 = 0.0;
@@ -465,6 +486,8 @@ int main(int argc, char **argv){
 				max_comms[id] = world.isend(master,msg_max,my_max[id]);
 				l1_comms[id] = world.isend(master,msg_l1,my_l1[id]);
 			}
+
+			computeCircumRadiusStatistics(my_regions);
 
 			my_timers[4].stop();
 			
@@ -662,8 +685,14 @@ void readParamsFile(){/*{{{*/
 		pout << "2" << endl;
 		pout << "What sorting method do you want to use? (0 - dot product, 1 - Voronoi)" << endl;
 		pout << "0" << endl;
-		pout << "If using Voronoi sort, what distance do you want to allow along the connecting line between regions? (between 0.0 and 1.0)" << endl;
-		pout << "0.6" << endl;
+		pout << "If using Voronoi sort, where would you like to place the edges of the Voronoi cell along the line between region centers? (between 0.0 and 1.0, 0.5 is the definition)." << endl;
+		pout << "0.55" << endl;
+		pout << "If using Voronoi sort, what is the maximum number of average circumradii outside the regions Voronoi cell do you want to include?" << endl;
+		pout << "5" << endl;
+		pout << "If using Voronoi sort, what is the minimum number of average circumradii outside the regions Voronoi cell do you want to include?" << endl;
+		pout << "1" << endl;
+		pout << "If using Voronoi sort, how many iterations do you want the maximum number of circumradii included?" << endl;
+		pout << "100" << endl;
 		pout << "What is the maximum allowable distance between boundary points? (Given in km)" << endl;
 		pout << "4.0" << endl;
 		pout << "Which format for restart files would you like? (0 - text, 1 - netcdf, 2 - both, 0 will be selected if netcdf is not linked)" << endl;
@@ -715,6 +744,15 @@ void readParamsFile(){/*{{{*/
 	params.ignore(10000,'\n');
 	getline(params,junk);
 	params >> sort_distance;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> sort_max_radius_include;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> sort_min_radius_include;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> sort_max_radius_iterations;
 	params.ignore(10000,'\n');
 	getline(params,junk);
 	params >> max_resolution;
@@ -1861,18 +1899,19 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 					if(min_region == (*region_itr).center.idx){
 						(*region_itr).points.push_back((*point_itr));
 						added = 1;
-					}
-					for(neighbor_itr = (*region_itr).neighbors1.begin(); 
-							neighbor_itr != (*region_itr).neighbors1.end() && added == 0; 
-							++neighbor_itr){
-						if(min_region == (*neighbor_itr)){
-							val = (*region_itr).center.dotForAngle(regions[min_region].center);
+					} else {
+						for(neighbor_itr = (*region_itr).neighbors1.begin(); 
+								neighbor_itr != (*region_itr).neighbors1.end() && added == 0; 
+								++neighbor_itr){
+							if(min_region == (*neighbor_itr)){
+								val = (*region_itr).center.dotForAngle(regions[min_region].center);
 
-							if(my_val < sort_distance*val) {
-								(*region_itr).points.push_back((*point_itr));
+								if(my_val < sort_distance * val + (*region_itr).ave_circumradius * sort_radius_include) {
+									(*region_itr).points.push_back((*point_itr));
+								}
+
+								added = 1;
 							}
-
-							added = 1;
 						}
 					}
 
@@ -2239,6 +2278,43 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 
 	delete(tops);
 	delete(bots);
+
+	#ifdef _DEBUG
+		cerr << "Done Integrating regions " << id << endl;
+	#endif
+	return;
+}/*}}}*/
+void computeCircumRadiusStatistics(vector<region> &region_vec){/*{{{*/
+	// Integrate Voronoi cells inside of my region
+	// Every region updates all points that are closer to their region center than any other region center.
+	// This ensures that each point is only updated once.
+	int vi1, vi2, vi3;
+	pnt a, b, c;
+	double temp_cradius;
+
+	#ifdef _DEBUG
+		cerr << "Integrating regions " << id << endl;
+	#endif
+
+	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
+		(*region_itr).ave_circumradius = 0.0;
+		(*region_itr).max_circumradius = 0.0;
+		for(tri_itr = (*region_itr).triangles.begin(); tri_itr != (*region_itr).triangles.end(); ++tri_itr){
+			vi1 = (*tri_itr).vi1;
+			vi2 = (*tri_itr).vi2;
+			vi3 = (*tri_itr).vi3;
+
+			a = points[vi1];
+			b = points[vi2];
+			c = points[vi3];
+
+			temp_cradius = circumradius(a, b, c);
+
+			(*region_itr).ave_circumradius += temp_cradius;
+			(*region_itr).max_circumradius = max((*region_itr).max_circumradius, temp_cradius);
+		}
+		(*region_itr).ave_circumradius = (*region_itr).ave_circumradius / (*region_itr).triangles.size();
+	}
 
 	#ifdef _DEBUG
 		cerr << "Done Integrating regions " << id << endl;

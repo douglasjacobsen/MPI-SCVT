@@ -21,9 +21,15 @@ What do you want your convergence criteria to be? (eps = 1E-10)
 What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point)
 2
 What sorting method do you want to use? (0 - dot product, 1 - voronoi)
-0
-If using Voronoi sort, what distance do you want to allow along the connecting line between regions? (between 0.0 and 1.0)
-0.6
+1
+If using Voronoi sort, where would you like to place the edges of the Voronoi cell along the line between region centers? (between 0.0 and 1.0, 0.5 is the definition).
+0.5
+If using Voronoi sort, what is the maximum number of average circumradii outside the region's Voronoi cell do you want to include?
+2
+If using Voronoi sort, what is the minimum number of average circumradii outside the region's Voronoi cell do you want to include?
+2
+If using Voronoi sort, how many iterations do you want the maximum number of circumradii included?
+300
 What is the maximum allowable distance between boundary points? (Given in km)
 4.0
 Which format for restart files would you like? (0 - text, 1 - netcdf, 2 - both, 0 will be selected if netcdf is not linked)
