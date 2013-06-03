@@ -20,8 +20,10 @@ What do you want your convergence criteria to be? (eps = 1E-10)
 1E-10
 What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point)
 2
-What sorting method do you want to use? (0 - dot product, 1 - voronoi)
+What sorting method do you want to use? (0 - dot product, 1 - Voronoi, 2 - Enforced, 3 - Enforced Heuristic)
 0
+If using enforced heuristic sort method. How many approximate grid spacings do you want to add on to the Voronoi cell for sorting? ( >= 0)
+4
 What is the maximum allowable distance between boundary points? (Given in km)
 4.0
 Which format for restart files would you like? (0 - text, 1 - netcdf, 2 - both, 0 will be selected if netcdf is not linked)
