@@ -103,6 +103,9 @@ class region{/*{{{*/
 		vector<pnt> boundary_points;
 		vector<int> loop_start; // beginning point in loop
 		vector<int> loop_stop; // ending point in loop
+		vector<pnt> neighbor_points;
+		vector<pnt> bad_circumcenters;
+		vector<double> bad_circumradii;
 };/*}}}*/
 
 struct int_hasher {/*{{{*/
@@ -166,7 +169,7 @@ mpi::communicator world;
 enum {msg_points, msg_tri_print , msg_restart, msg_ave, msg_max, msg_l1};
 
 // Sort types
-enum {sort_dot, sort_vor, sort_in_vor, sort_enforced_part_1, sort_enforced_part_2};
+enum {sort_dot, sort_vor, sort_in_vor, sort_enforced, sort_enforced_part_1, sort_enforced_part_2};
 
 // Global constants
 int points_begin = 0;
@@ -264,6 +267,7 @@ void quadrature19P(const pnt &A, const pnt &B, const pnt &C, pnt &top, double &b
 /*}}}*/
 /* ***** Generic Region Routines *****{{{ */
 void sortPoints(int sort_type, vector<region> &region_vec);
+int sortBadTriangles(vector<region> &region_vec);
 void sortBoundaryPoints(vector<region> &region_vec);
 void triangulateRegions(vector<region> &region_vec);
 void integrateRegions(vector<region> &region_vec);
@@ -298,6 +302,7 @@ int main(int argc, char **argv){
 	int it, i;
 	int stop, do_proj;
 	int ave_points, my_points;
+	int retri;
 	mpi::request *ave_comms, *max_comms, *l1_comms;
 	double *my_ave, *my_max, *my_l1;
 	double glob_ave, glob_max, glob_l1;
@@ -425,14 +430,24 @@ int main(int argc, char **argv){
 
 			my_timers[7].start(); // Sort Timer
 
-			sortPoints(sort_method, my_regions);
+			if(sort_method == sort_enforced){
+				sortPoints(sort_enforced_part_1, my_regions);	
+			} else {
+				sortPoints(sort_method, my_regions);
+			}
 
 			my_timers[7].stop(); // Sort Timer
 
 			my_timers[2].start(); // Triangulation Timer
 
 			triangulateRegions(my_regions);
-			//makeFinalTriangulations(my_regions);
+			if(sort_method == sort_enforced){
+				retri = sortBadTriangles(my_regions);
+				if(retri > 0){
+					sortPoints(sort_enforced_part_2, my_regions);
+					triangulateRegions(my_regions);
+				}
+			}
 
 			my_timers[2].stop();
 
@@ -1875,7 +1890,7 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 				min_val = M_PI;
 				my_val = (*point_itr).dotForAngle((*region_itr).center);
 
-				if(my_val < (*region_itr).input_radius){
+//				if(my_val < (*region_itr).input_radius){
 					for(neighbor_itr = (*region_itr).neighbors2.begin(); 
 							neighbor_itr != (*region_itr).neighbors2.end(); ++neighbor_itr){
 
@@ -1893,16 +1908,132 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 						(*region_itr).points.push_back((*point_itr));
 						added = 1;
 					}
-				}
+					for(neighbor_itr = (*region_itr).neighbors1.begin(); 
+							neighbor_itr != (*region_itr).neighbors1.end() && added == 0; 
+							++neighbor_itr){
+						if(min_region == (*neighbor_itr)){
+							(*region_itr).neighbor_points.push_back((*point_itr));
+							added = 1;
+						}
+					}
+//				}
 
 				(*region_itr).radius = max_dist;
 			}
 		}
+	} else if (sort_type == sort_enforced_part_2){
+		//Determines all points in circumcircles that extend outside a region's Voronoi cell.
+		double max_val;
+		double val;
+		vector<pnt>::iterator bad_circum_itr;
+		double cradius;
+		bool added;
+		int pnts_added;
+
+/* Second Cut at adding bad points.
+		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
+			pnts_added = 0;
+			max_val = 0.0;
+			for(bad_circum_itr = (*region_itr).bad_circumcenters.begin(); bad_circum_itr != (*region_itr).bad_circumcenters.end(); ++bad_circum_itr){
+				cradius = (*region_itr).bad_circumradii.at((*bad_circum_itr).idx);
+
+				val = (*bad_circum_itr).dotForAngle((*region_itr).center) + cradius;
+
+				max_val = max(max_val, val);
+			}
+
+			for(point_itr = (*region_itr).neighbor_points.begin(); point_itr != (*region_itr).neighbor_points.end(); ++point_itr){
+				val = (*point_itr).dotForAngle((*region_itr).center);
+
+				if(val < max_val){
+					(*region_itr).points.push_back((*point_itr));
+					pnts_added++;
+				}
+			}
+		}
+		// */
+
+// /* First cut at adding bad points.
+		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
+			pnts_added = 0;
+			for(point_itr = (*region_itr).neighbor_points.begin(); point_itr != (*region_itr).neighbor_points.end(); ++point_itr){
+				added = false;
+
+				for(bad_circum_itr = (*region_itr).bad_circumcenters.begin(); bad_circum_itr != (*region_itr).bad_circumcenters.end() && !added; ++bad_circum_itr){
+					cradius = (*region_itr).bad_circumradii.at((*bad_circum_itr).idx);
+
+					val = (*bad_circum_itr).dotForAngle((*point_itr));
+
+					if(val <= cradius){
+						(*region_itr).points.push_back((*point_itr));
+						added = true;
+						pnts_added++;
+					}
+				}
+
+			}
+		}
+// */
 	}
 #ifdef _DEBUG
 	cerr << "Done Sorting Points (Local) " << id << endl;
 #endif
 	return;
+}/*}}}*/
+int sortBadTriangles(vector<region> &region_vec){/*{{{*/
+	pnt a, b, c, ccenter;
+	int vi1, vi2, vi3;
+	double cradius;
+	double my_region_val, neigh_region_val;
+	bool bad_tri;
+	int bad_tris;
+	int retriangulate;
+
+	retriangulate = 0;
+
+	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
+		bad_tris = 0;
+
+		for(tri_itr = (*region_itr).triangles.begin(); tri_itr != (*region_itr).triangles.end(); ++tri_itr){
+			bad_tri = false;
+
+			vi1 = (*tri_itr).vi1;
+			vi2 = (*tri_itr).vi2;
+			vi3 = (*tri_itr).vi3;
+
+			a = points.at(vi1);
+			b = points.at(vi2);
+			c = points.at(vi3);
+
+			circumcenter(a, b, c, ccenter);
+			ccenter.normalize();
+			cradius = circumradius(a, b, c);
+
+			my_region_val = ccenter.dotForAngle((*region_itr).center) + cradius;
+
+			for(neighbor_itr = (*region_itr).neighbors1.begin();
+				neighbor_itr != (*region_itr).neighbors1.end() && !bad_tri;
+				++neighbor_itr){
+				
+				neigh_region_val = ccenter.dotForAngle(regions.at((*neighbor_itr)).center) - cradius;
+
+				if(neigh_region_val < my_region_val){
+					bad_tri = true;
+				}
+			}
+
+			if(bad_tri){
+				retriangulate = 1;
+				ccenter.idx = bad_tris;
+				bad_tris++;
+				(*region_itr).bad_circumcenters.push_back(ccenter);
+				(*region_itr).bad_circumradii.push_back(cradius);
+			}
+		}
+		cout << "Region " << (*region_itr).center.idx << " has " << bad_tris << " bad triangles." << endl;
+	}
+
+	return retriangulate;
 }/*}}}*/
 void sortBoundaryPoints(vector<region> &region_vec){/*{{{*/
 	//Sort points into my region(s).
@@ -1964,6 +2095,9 @@ void triangulateRegions(vector<region> &region_vec){/*{{{*/
 #endif
 
 	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
+
+		(*region_itr).triangles.clear();
+
 		in.numberofpoints = (*region_itr).points.size();
 		in.numberofpointattributes = 0;
 		in.pointlist = (double *) malloc(in.numberofpoints * 2 * sizeof(double));
@@ -2253,9 +2387,15 @@ void clearRegions(vector<region> &region_vec){/*{{{*/
 	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
 		(*region_itr).points.clear();
 		(*region_itr).triangles.clear();
+		(*region_itr).neighbor_points.clear();
+		(*region_itr).bad_circumcenters.clear();
+		(*region_itr).bad_circumradii.clear();
 
 		assert((*region_itr).points.empty());
 		assert((*region_itr).triangles.empty());
+		assert((*region_itr).neighbor_points.empty());
+		assert((*region_itr).bad_circumcenters.empty());
+		assert((*region_itr).bad_circumradii.empty());
 	}
 #ifdef _DEBUG
 	cerr << "Done Clearing local regions " << id << endl;
