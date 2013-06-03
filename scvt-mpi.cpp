@@ -2149,7 +2149,6 @@ int sortBadTriangles(vector<region> &region_vec){/*{{{*/
 				(*region_itr).bad_circumradii.push_back(cradius);
 			}
 		}
-		cout << "Region " << (*region_itr).center.idx << " has " << bad_tris << " bad triangles." << endl;
 	}
 
 	return retriangulate;
