@@ -104,6 +104,7 @@ class region{/*{{{*/
 		vector<int> loop_start; // beginning point in loop
 		vector<int> loop_stop; // ending point in loop
 		vector<pnt> neighbor_points;
+		vector<int> neighbor_point_region;
 		vector<pnt> bad_circumcenters;
 		vector<double> bad_circumradii;
 };/*}}}*/
@@ -169,7 +170,7 @@ mpi::communicator world;
 enum {msg_points, msg_tri_print , msg_restart, msg_ave, msg_max, msg_l1};
 
 // Sort types
-enum {sort_dot, sort_vor, sort_in_vor, sort_enforced, sort_enforced_part_1, sort_enforced_part_2};
+enum {sort_dot, sort_vor, sort_in_vor, sort_enforced, sort_enforced_heuristic, sort_enforced_part_1, sort_enforced_part_2};
 
 // Global constants
 int points_begin = 0;
@@ -1974,6 +1975,70 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 			}
 		}
 // */
+	} else if (sort_type == sort_enforced_heuristic) {
+		//Determines all points in regions voronoi cell.
+		double region_area, region_spacing, h;
+		int added;
+		double min_val, val;
+		double region_val;
+		double max_dist;
+		int min_region;
+		int i;
+		vector<int>::iterator cur_neigh_itr;
+
+		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
+			max_dist = 0.0;
+			for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
+				region_val = (*point_itr).dotForAngle((*region_itr).center);
+
+				if(region_val <= (*region_itr).input_radius){
+					min_val = M_PI;
+
+					for(neighbor_itr = (*region_itr).neighbors2.begin(); 
+							neighbor_itr != (*region_itr).neighbors2.end(); ++neighbor_itr){
+
+						val = (*point_itr).dotForAngle(regions.at((*neighbor_itr)).center);
+
+						if(val < min_val){
+							min_region = (*neighbor_itr);
+							min_val = val;
+						}
+					}
+
+					added = 0;
+
+					if(min_region == (*region_itr).center.idx){
+						(*region_itr).points.push_back((*point_itr));
+						added = 1;
+					}
+
+					for(neighbor_itr = (*region_itr).neighbors1.begin(); 
+							neighbor_itr != (*region_itr).neighbors1.end() && added == 0; 
+							++neighbor_itr){
+						if(min_region == (*neighbor_itr)){
+							(*region_itr).neighbor_points.push_back((*point_itr));
+							(*region_itr).neighbor_point_region.push_back(min_region);
+							added = 1;
+						}
+					}
+				}
+			}
+
+			h = sin((*region_itr).input_radius * 0.5);
+			region_area = 2.0 * M_PI * h;
+			region_spacing = region_area / (*region_itr).points.size();
+			region_spacing = sqrt(region_spacing / ( 2.0 * M_PI ) );
+
+			for(point_itr = (*region_itr).neighbor_points.begin(), i = 0; point_itr != (*region_itr).neighbor_points.end(); ++point_itr, i++){
+				min_region = (*region_itr).neighbor_point_region.at(i);
+				region_val = (*region_itr).center.dotForAngle(regions.at(min_region).center) * 0.5 + 4.0*region_spacing;
+				val = (*point_itr).dotForAngle((*region_itr).center);
+
+				if(val < region_val){
+					(*region_itr).points.push_back((*point_itr));
+				}
+			}
+		}
 	}
 #ifdef _DEBUG
 	cerr << "Done Sorting Points (Local) " << id << endl;
@@ -2388,12 +2453,14 @@ void clearRegions(vector<region> &region_vec){/*{{{*/
 		(*region_itr).points.clear();
 		(*region_itr).triangles.clear();
 		(*region_itr).neighbor_points.clear();
+		(*region_itr).neighbor_point_region.clear();
 		(*region_itr).bad_circumcenters.clear();
 		(*region_itr).bad_circumradii.clear();
 
 		assert((*region_itr).points.empty());
 		assert((*region_itr).triangles.empty());
 		assert((*region_itr).neighbor_points.empty());
+		assert((*region_itr).neighbor_point_region.empty());
 		assert((*region_itr).bad_circumcenters.empty());
 		assert((*region_itr).bad_circumradii.empty());
 	}
