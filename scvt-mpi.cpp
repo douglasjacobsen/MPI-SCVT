@@ -95,6 +95,7 @@ class region{/*{{{*/
 		pnt center;
 		double radius;
 		double input_radius;
+		double spacing_factor;
 		vector<pnt> points;
 		vector<tri> triangles;
 		vector<int> neighbors; // First Level of Neighbors
@@ -170,7 +171,7 @@ mpi::communicator world;
 enum {msg_points, msg_tri_print , msg_restart, msg_ave, msg_max, msg_l1};
 
 // Sort types
-enum {sort_dot, sort_vor, sort_in_vor, sort_enforced, sort_enforced_heuristic, sort_enforced_part_1, sort_enforced_part_2};
+enum {sort_dot, sort_vor, sort_enforced, sort_enforced_heuristic, sort_in_vor, sort_enforced_part_1, sort_enforced_part_2};
 
 // Global constants
 int points_begin = 0;
@@ -184,6 +185,7 @@ int num_bisections = 0;
 int conv = 0;
 int restart = 0;
 int sort_method = sort_dot;
+int heuristic_number = 0;
 double min_bdry_angle = 1.0;
 double eps = 1.0E-10;
 double proj_alpha;
@@ -368,6 +370,7 @@ int main(int argc, char **argv){
 	mpi::broadcast(world,max_it,master);
 	mpi::broadcast(world,restart,master);
 	mpi::broadcast(world,sort_method,master);
+	mpi::broadcast(world,heuristic_number,master);
 	mpi::broadcast(world,max_it_no_proj,master);
 	mpi::broadcast(world,max_it_scale_alpha,master);
 	mpi::broadcast(world,num_bisections,master);
@@ -557,7 +560,19 @@ int main(int argc, char **argv){
 	ave_points = 0;
 	my_points = 0;
 	clearRegions(my_regions);
-	sortPoints(sort_method, my_regions);
+	if(sort_method == sort_enforced){
+		sortPoints(sort_enforced_part_1, my_regions);
+		triangulateRegions(my_regions);
+		if(sort_method == sort_enforced){
+			retri = sortBadTriangles(my_regions);
+			if(retri > 0){
+				sortPoints(sort_enforced_part_2, my_regions);
+				triangulateRegions(my_regions);
+			}
+		}
+	} else {
+		sortPoints(sort_method, my_regions);
+	}
 	for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
 		my_points += (*region_itr).points.size();
 	}
@@ -568,6 +583,24 @@ int main(int argc, char **argv){
 	if(id == master){
 		cout << endl;
 		cout << "Average points per region: " << ave_points << endl;
+		cout << endl;
+	}
+
+	//Compute average points per voronoi cell for diagnostics
+	ave_points = 0;
+	my_points = 0;
+	clearRegions(my_regions);
+	sortPoints(sort_in_vor, my_regions);
+	for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
+		my_points += (*region_itr).points.size();
+	}
+
+	mpi::reduce(world, my_points, ave_points, std::plus<int>(), master);
+
+	ave_points = ave_points / regions.size();	
+	if(id == master){
+		cout << endl;
+		cout << "Average points per Voronoi cell: " << ave_points << endl;
 		cout << endl;
 	}
 
@@ -656,8 +689,10 @@ void readParamsFile(){/*{{{*/
 		pout << "1E-10" << endl;
 		pout << "What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point)" << endl;
 		pout << "2" << endl;
-		pout << "What sorting method do you want to use? (0 - dot product, 1 - voronoi)" << endl;
+		pout << "What sorting method do you want to use? (0 - dot product, 1 - Voronoi, 2 - Enforced, 3 - Enforced Heuristic)" << endl;
 		pout << "0" << endl;
+		pout << "If using enforced heuristic sort method. How many approximate grid spacings do you want to add on to the Voronoi cell for sorting? ( >= 0)" << endl;
+		pout << "4" << endl;
 		pout << "What is the maximum allowable distance between boundary points? (Given in km)" << endl;
 		pout << "4.0" << endl;
 		pout << "Which format for restart files would you like? (0 - text, 1 - netcdf, 2 - both, 0 will be selected if netcdf is not linked)" << endl;
@@ -708,7 +743,9 @@ void readParamsFile(){/*{{{*/
 	params >> sort_method;
 	params.ignore(10000,'\n');
 	getline(params,junk);
-// 	params >> min_bdry_angle;
+	params >> heuristic_number;
+	params.ignore(10000,'\n');
+	getline(params,junk);
 	params >> max_resolution;
 	params.ignore(10000,'\n');
 	getline(params,junk);
@@ -883,6 +920,7 @@ void buildRegions(){/*{{{*/
 	pnt p;
 	double loc_radius, max_radius;
 	double alpha, beta;
+	double my_dens, neigh_dens, max_ratio, ratio;
 	int min_connectivity;
 	int t1, t2, t3;
 	int i;
@@ -986,6 +1024,8 @@ void buildRegions(){/*{{{*/
 
 	// Build first and second levels of neighbors, for use in more complicated sort method.
 	for(region_itr = regions.begin(); region_itr != regions.end(); ++region_itr){
+		my_dens = density((*region_itr).center);
+
 		neighbors1.clear();
 		neighbors2.clear();
 
@@ -1002,13 +1042,27 @@ void buildRegions(){/*{{{*/
 			}
 		}
 
+		loc_radius = 0.0;
+		max_ratio = 0.0;
 		for(neigh_itr = neighbors1.begin(); neigh_itr != neighbors1.end(); ++neigh_itr){
 			(*region_itr).neighbors1.push_back((*neigh_itr));
+			loc_radius = max(loc_radius, (*region_itr).center.dotForAngle(regions.at((*neigh_itr)).center));
+
+			neigh_dens = density(regions.at((*neigh_itr)).center);
+			ratio = powf(my_dens / neigh_dens, 0.25);
+			max_ratio = max(ratio, max_ratio);
 		}
 
+		(*region_itr).spacing_factor = max_ratio;
+
+		max_radius = 0.0;
 		for(neigh_itr = neighbors2.begin(); neigh_itr != neighbors2.end(); ++neigh_itr){
 			(*region_itr).neighbors2.push_back((*neigh_itr));
+			max_radius = max(max_radius, (*region_itr).center.dotForAngle(regions.at((*neigh_itr)).center));
 		}
+
+		(*region_itr).radius = (max_radius+loc_radius) * 0.5;
+		(*region_itr).input_radius = min(max_radius, M_PI);
 	}
 
 	region_neighbors.clear();
@@ -1931,7 +1985,7 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 		bool added;
 		int pnts_added;
 
-/* Second Cut at adding bad points.
+// /* Second Cut at adding bad points.
 		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
 			pnts_added = 0;
 			max_val = 0.0;
@@ -1954,7 +2008,7 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 		}
 		// */
 
-// /* First cut at adding bad points.
+ /* First cut at adding bad points.
 		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
 			pnts_added = 0;
 			for(point_itr = (*region_itr).neighbor_points.begin(); point_itr != (*region_itr).neighbor_points.end(); ++point_itr){
@@ -2024,14 +2078,14 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 				}
 			}
 
-			h = sin((*region_itr).input_radius * 0.5);
+			h = sin((*region_itr).radius * 0.5);
 			region_area = 2.0 * M_PI * h;
 			region_spacing = region_area / (*region_itr).points.size();
-			region_spacing = sqrt(region_spacing / ( 2.0 * M_PI ) );
+			region_spacing = sqrt(region_spacing / ( 2.0 * M_PI ) ) * (*region_itr).spacing_factor;
 
 			for(point_itr = (*region_itr).neighbor_points.begin(), i = 0; point_itr != (*region_itr).neighbor_points.end(); ++point_itr, i++){
 				min_region = (*region_itr).neighbor_point_region.at(i);
-				region_val = (*region_itr).center.dotForAngle(regions.at(min_region).center) * 0.5 + 4.0*region_spacing;
+				region_val = (*region_itr).center.dotForAngle(regions.at(min_region).center) * 0.5 + heuristic_number * region_spacing;
 				val = (*point_itr).dotForAngle((*region_itr).center);
 
 				if(val < region_val){
@@ -3143,7 +3197,7 @@ int writeRestartFileRetainTXT( const int it ) {/*{{{*/
 
 double density(const pnt &p){/*{{{*/
 	//density returns the value of the density function at point p
-	return 1.0; // Uniform density
+//	return 1.0; // Uniform density
 
 	/* Density function for Shallow Water Test Case 5 
 	pnt cent;
