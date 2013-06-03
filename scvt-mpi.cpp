@@ -166,7 +166,7 @@ mpi::communicator world;
 enum {msg_points, msg_tri_print , msg_restart, msg_ave, msg_max, msg_l1};
 
 // Sort types
-enum {sort_dot, sort_vor};
+enum {sort_dot, sort_vor, sort_in_vor, sort_enforced_part_1, sort_enforced_part_2};
 
 // Global constants
 int points_begin = 0;
@@ -1854,6 +1854,44 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 
 					if(my_val > max_dist){
 						max_dist = my_val;
+					}
+				}
+
+				(*region_itr).radius = max_dist;
+			}
+		}
+	} else if (sort_type == sort_in_vor || sort_type == sort_enforced_part_1){
+		//Determines all points in regions voronoi cell.
+		double my_val;
+		int added;
+		double min_val;
+		double max_dist;
+		int min_region;
+		vector<int>::iterator cur_neigh_itr;
+
+		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
+			max_dist = 0.0;
+			for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
+				min_val = M_PI;
+				my_val = (*point_itr).dotForAngle((*region_itr).center);
+
+				if(my_val < (*region_itr).input_radius){
+					for(neighbor_itr = (*region_itr).neighbors2.begin(); 
+							neighbor_itr != (*region_itr).neighbors2.end(); ++neighbor_itr){
+
+						val = (*point_itr).dotForAngle(regions.at((*neighbor_itr)).center);
+
+						if(val < min_val){
+							min_region = (*neighbor_itr);
+							min_val = val;
+						}
+					}
+
+					added = 0;
+
+					if(min_region == (*region_itr).center.idx){
+						(*region_itr).points.push_back((*point_itr));
+						added = 1;
 					}
 				}
 
