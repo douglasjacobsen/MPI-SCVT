@@ -168,7 +168,7 @@ mpi::communicator world;
 enum {msg_points, msg_tri_print , msg_restart, msg_ave, msg_max, msg_l1};
 
 // Sort types
-enum {sort_dot, sort_vor, sort_in_vor};
+enum {sort_dot, sort_full_vor, sort_expanded_vor, sort_in_vor};
 
 // Global constants
 int points_begin = 0;
@@ -182,6 +182,7 @@ int num_bisections = 0;
 int conv = 0;
 int restart = 0;
 int sort_method = sort_dot;
+double expand_parameter = 1.0;
 double min_bdry_angle = 1.0;
 double eps = 1.0E-10;
 double proj_alpha;
@@ -360,6 +361,7 @@ int main(int argc, char **argv){
 	init_quadrature();
 
 	// Broadcast parameters, regions, and initial point set to each processor.
+	mpi::broadcast(world,expand_parameter,master);
 	mpi::broadcast(world,num_pts,master);
 	mpi::broadcast(world,max_it,master);
 	mpi::broadcast(world,restart,master);
@@ -503,10 +505,17 @@ int main(int argc, char **argv){
 				} else if(conv == 2 && glob_max < eps){
 					cout << "Converged on maximum movement." << endl;
 					stop = 1;
+				} else if(it > 0 && glob_max >= 1e-1 && sort_method == sort_expanded_vor){
+					cout << " *** This grid doesn't seem to be converging. Expanding Voronoi cell by 2.5%. ***" << endl;
+					stop = -1;
 				}
 			}
 
 			mpi::broadcast(world,stop,master);
+			if(stop == -1){
+				expand_parameter += 0.025;
+				stop = 0;
+			}
 			my_timers[6].stop();
 			my_timers[1].stop();
 			
@@ -585,7 +594,11 @@ int main(int argc, char **argv){
 	// write triangles to triangles.dat
 	global_timers[2].start(); // Final Triangulation Timer
 	clearRegions(my_regions);
-	sortPoints(sort_vor, my_regions);
+	if(sort_method == sort_expanded_vor){
+		sortPoints(sort_full_vor, my_regions);
+	} else {
+		sortPoints(sort_method, my_regions);
+	}
 	makeFinalTriangulations(my_regions);
 	global_timers[2].stop();
 
@@ -660,8 +673,8 @@ void readParamsFile(){/*{{{*/
 		pout << "1E-10" << endl;
 		pout << "What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point)" << endl;
 		pout << "2" << endl;
-		pout << "What sorting method do you want to use? (0 - dot product, 1 - voronoi)" << endl;
-		pout << "0" << endl;
+		pout << "What sorting method do you want to use? (0 - Dot Product, 1 - Full Voronoi, 2 - Expandable Voronoi (Auto-Correcting) )" << endl;
+		pout << "1" << endl;
 		pout << "What is the maximum allowable distance between boundary points? (Given in km)" << endl;
 		pout << "4.0" << endl;
 		pout << "Which format for restart files would you like? (0 - text, 1 - netcdf, 2 - both, 0 will be selected if netcdf is not linked)" << endl;
@@ -1831,7 +1844,43 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 				} 
 			}
 		}
-	} else if (sort_type == sort_vor){
+	} else if (sort_type == sort_full_vor){
+		// Sort that determines all points in a set of Voronoi cells for the region.
+		double my_val, min_val;
+		int added;
+		int min_region;
+
+		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
+			for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
+				min_val = M_PI;
+				my_val = (*point_itr).dotForAngle((*region_itr).center);
+
+				if(my_val < (*region_itr).input_radius){
+					for(neighbor_itr = (*region_itr).neighbors2.begin(); 
+							neighbor_itr != (*region_itr).neighbors2.end(); ++neighbor_itr){
+
+						val = (*point_itr).dotForAngle(regions.at((*neighbor_itr)).center);
+
+						if(val < min_val){
+							min_region = (*neighbor_itr);
+							min_val = val;
+						}
+					}
+
+					added = 0;
+
+					for(neighbor_itr = (*region_itr).neighbors1.begin(); 
+							neighbor_itr != (*region_itr).neighbors1.end() && added == 0; 
+							++neighbor_itr){
+						if(min_region == (*neighbor_itr)){
+							(*region_itr).points.push_back((*point_itr));
+							added = 1;
+						}
+					}
+				}
+			}
+		}
+	} else if (sort_type == sort_expanded_vor){
 		// Sort that determines all points in an expanded version of the owned region's Voronoi cel.
 		double my_val;
 		int min_region;
@@ -1847,7 +1896,7 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 
 						val = (*point_itr).dotForAngle(regions.at((*neighbor_itr)).center);
 
-						if(val < my_val){
+						if(val * expand_parameter < my_val){
 							min_region = (*neighbor_itr);
 						}
 					}
@@ -1857,7 +1906,7 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 					}
 				}
 			}
-		}
+		} // */
 	} else if (sort_type == sort_in_vor){
 		// Sort that determines all points in the owned region's Voronoi cell.
 		double my_val;
@@ -2927,9 +2976,9 @@ int writeRestartFileRetainTXT( const int it ) {/*{{{*/
 
 double density(const pnt &p){/*{{{*/
 	//density returns the value of the density function at point p
-	return 1.0; // Uniform density
+//	return 1.0; // Uniform density
 
-	/* Density function for Shallow Water Test Case 5 
+//	/* Density function for Shallow Water Test Case 5 
 	pnt cent;
 	double r;
 	double norm;
@@ -2941,7 +2990,7 @@ double density(const pnt &p){/*{{{*/
 	cent.normalize();
 
 	width = 0.15;
-	min_val = 1.0/8.0;
+	min_val = 1.0/16.0;
 	min_val = pow(min_val,4);
 	trans_cent = 30.0*M_PI/180.0;
 	norm = 1.0/(1.0-min_val);
