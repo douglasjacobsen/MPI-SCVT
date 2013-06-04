@@ -86,6 +86,7 @@ class region{/*{{{*/
 				ar & neighbors;
 				ar & neighbors1;
 				ar & neighbors2;
+				ar & neighbors2_only;
 				ar & boundary_points;
 				ar & loop_start;
 				ar & loop_stop;
@@ -100,6 +101,7 @@ class region{/*{{{*/
 		vector<int> neighbors; // First Level of Neighbors
 		vector<int> neighbors1; // First Level of Neighbors + Self
 		vector<int> neighbors2; // Second Level of Neighbors + First Level of Neighbors + Self
+		vector<int> neighbors2_only; // Second Level of Neighbors Only
 		vector<pnt> boundary_points;
 		vector<int> loop_start; // beginning point in loop
 		vector<int> loop_stop; // ending point in loop
@@ -986,13 +988,20 @@ void buildRegions(){/*{{{*/
 			}
 		}
 
-		for(neigh_itr = neighbors1.begin(); neigh_itr != neighbors1.end(); ++neigh_itr){
-			(*region_itr).neighbors1.push_back((*neigh_itr));
-		}
 
 		for(neigh_itr = neighbors2.begin(); neigh_itr != neighbors2.end(); ++neigh_itr){
 			(*region_itr).neighbors2.push_back((*neigh_itr));
 		}
+
+		for(neigh_itr = neighbors1.begin(); neigh_itr != neighbors1.end(); ++neigh_itr){
+			(*region_itr).neighbors1.push_back((*neigh_itr));
+			neighbors2.erase((*neigh_itr));
+		}
+
+		for(neigh_itr = neighbors2.begin(); neigh_itr != neighbors2.end(); ++neigh_itr){
+			(*region_itr).neighbors2_only.push_back((*neigh_itr));
+		}
+
 	}
 
 	region_neighbors.clear();
@@ -1809,7 +1818,6 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 		//Should handle variable resolution meshes better than the more simple dot product sorting.
 		double my_val;
 		int added;
-		double min_val;
 		double max_dist;
 		int min_region;
 		vector<int>::iterator cur_neigh_itr;
@@ -1817,47 +1825,28 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
 			max_dist = 0.0;
 			for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
-				min_val = M_PI;
 				my_val = (*point_itr).dotForAngle((*region_itr).center);
 
 				if(my_val < (*region_itr).input_radius){
-					for(neighbor_itr = (*region_itr).neighbors2.begin(); 
-							neighbor_itr != (*region_itr).neighbors2.end(); ++neighbor_itr){
+					min_region = (*region_itr).center.idx;
+					for(neighbor_itr = (*region_itr).neighbors2_only.begin(); 
+							neighbor_itr != (*region_itr).neighbors2_only.end(); ++neighbor_itr){
 
 						val = (*point_itr).dotForAngle(regions.at((*neighbor_itr)).center);
 
-						if(val < min_val){
+						if(val < my_val){
 							min_region = (*neighbor_itr);
-							min_val = val;
 						}
 					}
-
-					added = 0;
 
 					if(min_region == (*region_itr).center.idx){
-						(*region_itr).points.push_back((*point_itr));
-						added = 1;
-					}
-					for(neighbor_itr = (*region_itr).neighbors1.begin(); 
-							neighbor_itr != (*region_itr).neighbors1.end() && added == 0; 
-							++neighbor_itr){
-						if(min_region == (*neighbor_itr)){
-							val = (*region_itr).center.dotForAngle(regions[min_region].center);
-
-							if(my_val < val) {
-								(*region_itr).points.push_back((*point_itr));
-							}
-
-							added = 1;
-						}
+						(*region_itr).points.push_back((*point_itr));	
 					}
 
 					if(my_val > max_dist){
 						max_dist = my_val;
 					}
 				}
-
-				(*region_itr).radius = max_dist;
 			}
 		}
 	}
@@ -2908,7 +2897,7 @@ double density(const pnt &p){/*{{{*/
 	double min_val;
 	double width, trans_cent;
 
-	cent = pnt(0.0, -0.866025403784439, 0.5);
+	cent = pnt(0.0, 0.0, 1.0);
 	cent.normalize();
 
 	width = 0.15;
