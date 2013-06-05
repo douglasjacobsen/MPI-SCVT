@@ -898,7 +898,7 @@ void buildRegions(){/*{{{*/
 	vector<int>::iterator cur_neigh_itr;
 	region r;
 	pnt p;
-	double loc_radius, max_radius;
+	double loc_radius, max_radius, max_radius1, max_radius2;
 	double alpha, beta;
 	int min_connectivity;
 	int t1, t2, t3;
@@ -1019,15 +1019,24 @@ void buildRegions(){/*{{{*/
 			}
 		}
 
-
+		max_radius2 = 0.0;
 		for(neigh_itr = neighbors2.begin(); neigh_itr != neighbors2.end(); ++neigh_itr){
 			(*region_itr).neighbors2.push_back((*neigh_itr));
+			loc_radius = (*region_itr).center.dotForAngle(regions.at((*neigh_itr)).center);
+			max_radius2 = max(loc_radius, max_radius2);
 		}
 
+		max_radius1 = 0.0;
 		for(neigh_itr = neighbors1.begin(); neigh_itr != neighbors1.end(); ++neigh_itr){
 			(*region_itr).neighbors1.push_back((*neigh_itr));
 			neighbors2.erase((*neigh_itr));
+
+			loc_radius = (*region_itr).center.dotForAngle(regions.at((*neigh_itr)).center);
+			max_radius1 = max(loc_radius, max_radius1);
 		}
+
+		(*region_itr).input_radius = std::min(M_PI, (max_radius1 + max_radius2) * 0.5);
+		(*region_itr).radius = std::min(M_PI, (max_radius1 + max_radius2) * 0.5);
 
 		for(neigh_itr = neighbors2.begin(); neigh_itr != neighbors2.end(); ++neigh_itr){
 			(*region_itr).neighbors2_only.push_back((*neigh_itr));
