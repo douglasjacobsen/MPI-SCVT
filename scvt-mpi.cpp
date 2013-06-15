@@ -171,7 +171,7 @@ mpi::communicator world;
 enum {msg_points, msg_tri_print , msg_restart, msg_ave, msg_max, msg_l1};
 
 // Sort types
-enum {sort_dot, sort_vor, sort_in_owned_vor};
+enum {sort_dot, sort_vor, sort_merge, sort_in_owned_vor};
 
 // Global constants
 int points_begin = 0;
@@ -185,6 +185,7 @@ int num_bisections = 0;
 int conv = 0;
 int restart = 0;
 int sort_method = sort_dot;
+int sort_layers = 1;
 double min_bdry_angle = 1.0;
 double eps = 1.0E-10;
 double proj_alpha;
@@ -370,6 +371,7 @@ int main(int argc, char **argv){
 	mpi::broadcast(world,max_it,master);
 	mpi::broadcast(world,restart,master);
 	mpi::broadcast(world,sort_method,master);
+	mpi::broadcast(world,sort_layers,master);
 	mpi::broadcast(world,max_it_no_proj,master);
 	mpi::broadcast(world,max_it_scale_alpha,master);
 	mpi::broadcast(world,num_bisections,master);
@@ -434,16 +436,18 @@ int main(int argc, char **argv){
 
 			my_timers[7].start(); // Sort Timer
 
-//			sortPoints(sort_method, my_regions);
-			sortAllPoints();
-			mergePoints(2);
+			if(sort_method == sort_merge){
+				sortAllPoints();
+				mergePoints(sort_layers);
+			} else {
+				sortPoints(sort_method, my_regions);
+			}
 
 			my_timers[7].stop(); // Sort Timer
 
 			my_timers[2].start(); // Triangulation Timer
 
 			triangulateRegions(my_regions);
-			//makeFinalTriangulations(my_regions);
 
 			my_timers[2].stop();
 
@@ -553,7 +557,12 @@ int main(int argc, char **argv){
 	ave_points = 0;
 	my_points = 0;
 	clearRegions(my_regions);
-	sortPoints(sort_method, my_regions);
+	if(sort_method == sort_merge){
+		sortAllPoints();
+		mergePoints(sort_layers);
+	} else {
+		sortPoints(sort_method, my_regions);
+	}
 	for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
 		my_points += (*region_itr).points.size();
 	}
@@ -567,6 +576,24 @@ int main(int argc, char **argv){
 		cout << endl;
 	}
 
+	//Compute average points per Voronoi cell for diagnostics
+	ave_points = 0;
+	my_points = 0;
+	clearRegions(my_regions);
+	sortPoints(sort_in_owned_vor, my_regions);
+	for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
+		my_points += (*region_itr).points.size();
+	}
+
+	mpi::reduce(world, my_points, ave_points, std::plus<int>(), master);
+
+	ave_points = ave_points / regions.size();	
+	if(id == master){
+		cout << endl;
+		cout << "Average points per Voronoi cell: " << ave_points << endl;
+		cout << endl;
+	}
+
 	//Gather all updated points onto master processor, for printing to end_points.dat
 	global_timers[1].start(); // Global Gather Timer
 	gatherAllUpdatedPoints();
@@ -577,7 +604,8 @@ int main(int argc, char **argv){
 	// write triangles to triangles.dat
 	global_timers[2].start(); // Final Triangulation Timer
 	clearRegions(my_regions);
-	sortPoints(sort_vor, my_regions);
+	sortAllPoints();
+	mergePoints(sort_layers);
 	makeFinalTriangulations(my_regions);
 	global_timers[2].stop();
 
@@ -652,10 +680,12 @@ void readParamsFile(){/*{{{*/
 		pout << "1E-10" << endl;
 		pout << "What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point)" << endl;
 		pout << "2" << endl;
-		pout << "What sorting method do you want to use? (0 - dot product, 1 - voronoi)" << endl;
+		pout << "What sorting method do you want to use? (0 - Dot product, 1 - Voronoi, 2 - Merge sort)" << endl;
 		pout << "0" << endl;
+		pout << "If using Merge sort, what is the minimum number of layers to include? (Minimum of 1)" << endl;
+		pout << "1" << endl;
 		pout << "What is the maximum allowable distance between boundary points? (Given in km)" << endl;
-		pout << "4.0" << endl;
+		pout << "4000.0" << endl;
 		pout << "Which format for restart files would you like? (0 - text, 1 - netcdf, 2 - both, 0 will be selected if netcdf is not linked)" << endl;
 		pout << "0" << endl;
 		pout << "Would you like one restart file, or a series? (0 - overwrite, 1 - retain, ignored if restart files are disabled above)" << endl;
@@ -704,7 +734,9 @@ void readParamsFile(){/*{{{*/
 	params >> sort_method;
 	params.ignore(10000,'\n');
 	getline(params,junk);
-// 	params >> min_bdry_angle;
+	params >> sort_layers;
+	params.ignore(10000,'\n');
+	getline(params,junk);
 	params >> max_resolution;
 	params.ignore(10000,'\n');
 	getline(params,junk);
