@@ -166,7 +166,7 @@ mpi::communicator world;
 enum {msg_points, msg_tri_print , msg_restart, msg_ave, msg_max, msg_l1};
 
 // Sort types
-enum {sort_dot, sort_vor};
+enum {sort_dot, sort_vor, sort_in_owned_vor};
 
 // Global constants
 int points_begin = 0;
@@ -280,6 +280,7 @@ void storeMyFinalTriangulation();
 /* ***** Communication Routines ***** {{{*/
 void transferUpdatedPoints();
 void gatherAllUpdatedPoints();
+void gatherAllUpdatedPoints_old();
 /*}}}*/
 /* ***** Routines for Points *****{{{*/
 void writePointsAsRestart(const int it, const restart_mode_type restart_mode, const fileio_mode_type fileio_mode);
@@ -467,7 +468,8 @@ int main(int argc, char **argv){
 			my_timers[4].stop();
 			
 			my_timers[5].start(); // Communication Timer
-			transferUpdatedPoints();
+//			transferUpdatedPoints();
+			gatherAllUpdatedPoints();
 			my_timers[5].stop();
 
 			my_timers[6].start();
@@ -1842,11 +1844,7 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 							neighbor_itr != (*region_itr).neighbors1.end() && added == 0; 
 							++neighbor_itr){
 						if(min_region == (*neighbor_itr)){
-							val = (*region_itr).center.dotForAngle(regions[min_region].center);
-
-							if(my_val < val) {
-								(*region_itr).points.push_back((*point_itr));
-							}
+							(*region_itr).points.push_back((*point_itr));
 
 							added = 1;
 						}
@@ -1858,6 +1856,37 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 				}
 
 				(*region_itr).radius = max_dist;
+			}
+		}
+	} else if (sort_type == sort_in_owned_vor){
+		//More complicated sort, that sorts by Voronoi cells keeping current regions points, as well as neighboring regions points.
+		//Should handle variable resolution meshes better than the more simple dot product sorting.
+		int added;
+		double min_val;
+		double max_dist;
+		int min_region;
+
+		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
+			for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
+				min_val = M_PI;
+
+				for(neighbor_itr = (*region_itr).neighbors1.begin(); 
+						neighbor_itr != (*region_itr).neighbors1.end(); ++neighbor_itr){
+
+					val = (*point_itr).dotForAngle(regions.at((*neighbor_itr)).center);
+
+					if(val < min_val){
+						min_region = (*neighbor_itr);
+						min_val = val;
+					}
+				}
+
+				added = 0;
+
+				if(min_region == (*region_itr).center.idx){
+					(*region_itr).points.push_back((*point_itr));
+					added = 1;
+				}
 			}
 		}
 	}
@@ -2639,6 +2668,57 @@ void transferUpdatedPoints(){/*{{{*/
 #endif
 }/*}}}*/
 void gatherAllUpdatedPoints(){/*{{{*/
+	//All updated points (stored in n_points) are gathered onto the master processor and broadcasted to every processor
+	vector<pnt> temp_points;
+	mpi::request mycomm;
+	optional options;
+#ifdef _DEBUG
+	cerr << "Gatering all updated points " << id << endl;
+#endif
+
+	if(num_procs > 1){
+		if(!n_points.empty()){
+			for(point_itr = n_points.begin(); point_itr != n_points.end(); ++point_itr){
+				points.at((*point_itr).idx) = (*point_itr);
+			}
+
+			n_points.clear();
+		}
+
+		clearRegions(my_regions);
+		sortPoints(sort_in_owned_vor, my_regions);
+
+		temp_points.clear();
+		if(id != master){
+			for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
+				for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); ++point_itr){
+					temp_points.push_back((*point_itr));
+				}
+			}
+		}
+
+		for(int i = 1; i < num_procs; i++){
+			if(id == i){
+				world.send(master, msg_points, temp_points);
+				points.clear();
+			} else if(id == master) {
+				world.recv(i, msg_points, temp_points);
+				for(point_itr = temp_points.begin(); point_itr != temp_points.end(); ++point_itr){
+					points.at((*point_itr).idx) = (*point_itr);
+				}
+				temp_points.clear();
+			}
+		}
+	}
+
+	temp_points.clear();
+	mpi::broadcast(world, points, master);
+
+#ifdef _DEBUG
+	cerr << "Done Gatering all updated points " << id << endl;
+#endif
+}/*}}}*/
+void gatherAllUpdatedPoints_old(){/*{{{*/
 	//All updated points (stored in n_points) are gathered onto the master processor and broadcasted to every processor
 	vector<pnt> temp_points;
 	mpi::request mycomm;
