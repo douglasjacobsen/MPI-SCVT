@@ -82,7 +82,9 @@ class region{/*{{{*/
 				ar & center;
 				ar & radius;
 				ar & input_radius;
+				ar & num_layers;
 				ar & triangles;
+				ar & neighbor_layers;
 				ar & neighbors;
 				ar & neighbors1;
 				ar & neighbors2;
@@ -95,8 +97,11 @@ class region{/*{{{*/
 		pnt center;
 		double radius;
 		double input_radius;
+		int num_layers;
 		vector<pnt> points;
 		vector<tri> triangles;
+		vector<bool> owned_points;
+		vector< vector<int> > neighbor_layers;
 		vector<int> neighbors; // First Level of Neighbors
 		vector<int> neighbors1; // First Level of Neighbors + Self
 		vector<int> neighbors2; // Second Level of Neighbors + First Level of Neighbors + Self
@@ -431,7 +436,7 @@ int main(int argc, char **argv){
 
 //			sortPoints(sort_method, my_regions);
 			sortAllPoints();
-			mergePoints(1);
+			mergePoints(2);
 
 			my_timers[7].stop(); // Sort Timer
 
@@ -1000,6 +1005,59 @@ void buildRegions(){/*{{{*/
 		for(neigh_itr = neighbors2.begin(); neigh_itr != neighbors2.end(); ++neigh_itr){
 			(*region_itr).neighbors2.push_back((*neigh_itr));
 		}
+	}
+
+	// Build list of nieghbors in each layer radiating outward from region center.
+	int num_layers;
+	bool added_region;
+	for(region_itr = regions.begin(); region_itr != regions.end(); ++region_itr){
+		num_layers = 0;
+
+		neighbors1.clear();
+		neighbors1.insert((*region_itr).center.idx);
+		num_layers = 0;
+		added_region = true;
+
+		while(added_region){
+			added_region = false;
+			num_layers++;
+			for(neigh_itr = neighbors1.begin(); neigh_itr != neighbors1.end(); ++neigh_itr){
+				for(cur_neigh_itr = regions.at((*neigh_itr)).neighbors1.begin(); cur_neigh_itr != regions.at((*neigh_itr)).neighbors1.end(); ++cur_neigh_itr){
+					if(neighbors1.find((*cur_neigh_itr)) == neighbors1.end()){
+						neighbors1.insert((*cur_neigh_itr));
+						added_region = true;
+					}
+				}
+			}
+		}
+
+		(*region_itr).num_layers = num_layers;
+
+		neighbors1.clear();
+		(*region_itr).neighbor_layers.clear();
+		(*region_itr).neighbor_layers.resize(num_layers);
+
+		neighbors1.insert((*region_itr).center.idx);
+		(*region_itr).neighbor_layers.at(0).clear();
+		(*region_itr).neighbor_layers.at(0).push_back((*region_itr).center.idx);
+
+		num_layers = 0;
+		added_region = true;
+
+		while(added_region){
+			added_region = false;
+			num_layers++;
+			for(neigh_itr = neighbors1.begin(); neigh_itr != neighbors1.end(); ++neigh_itr){
+				for(cur_neigh_itr = regions.at((*neigh_itr)).neighbors1.begin(); cur_neigh_itr != regions.at((*neigh_itr)).neighbors1.end(); ++cur_neigh_itr){
+					if(neighbors1.find((*cur_neigh_itr)) == neighbors1.end()){
+						neighbors1.insert((*cur_neigh_itr));
+						(*region_itr).neighbor_layers.at(num_layers).push_back((*cur_neigh_itr));
+						added_region = true;
+					}
+				}
+			}
+		}
+
 	}
 
 	region_neighbors.clear();
@@ -2249,9 +2307,11 @@ void clearRegions(vector<region> &region_vec){/*{{{*/
 	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); ++region_itr){
 		(*region_itr).points.clear();
 		(*region_itr).triangles.clear();
+		(*region_itr).owned_points.clear();
 
 		assert((*region_itr).points.empty());
 		assert((*region_itr).triangles.empty());
+		assert((*region_itr).owned_points.empty());
 	}
 #ifdef _DEBUG
 	cerr << "Done Clearing local regions " << id << endl;
@@ -2497,16 +2557,37 @@ void projectToBoundary(vector<region> &region_vec){/*{{{*/
 /* ***** Specifc Region Routines ***** {{{*/
 void mergePoints(int layer){/*{{{*/
 	int iLayer;
+	int endLayer;
+
+	if(layer <= 0){
+		endLayer = 1;
+	} else {
+		endLayer = layer;
+	}
 
 	for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
-//		for(iLayer = 1; iLayer < layer; iLayer++){
-			for(neighbor_itr = (*region_itr).neighbors1.begin(); neighbor_itr != (*region_itr).neighbors1.end(); ++neighbor_itr){
+		if(layer <= 0){
+			endLayer = 1;
+		} else {
+			if(layer > (*region_itr).num_layers-1){
+				endLayer = (*region_itr).num_layers-1;
+			} else {
+				endLayer = layer;
+			}
+		}
+
+		for(iLayer = 0; iLayer <= endLayer; iLayer++){
+			for(neighbor_itr = (*region_itr).neighbor_layers.at(iLayer).begin(); neighbor_itr != (*region_itr).neighbor_layers.at(iLayer).end(); ++neighbor_itr){
 				for(point_itr = regions.at((*neighbor_itr)).points.begin(); point_itr != regions.at((*neighbor_itr)).points.end(); ++point_itr){
 					(*region_itr).points.push_back((*point_itr));
+					if(iLayer == 0){
+						(*region_itr).owned_points.push_back(true);
+					} else {
+						(*region_itr).owned_points.push_back(false);
+					}
 				}
 			}
-
-//		}
+		}
 	}
 }/*}}}*/
 void sortAllPoints(){/*{{{*/
