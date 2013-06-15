@@ -273,6 +273,8 @@ void makeFinalTriangulations(vector<region> &region_vec);
 void projectToBoundary(vector<region> &region_vec);
 /*}}}*/
 /* ***** Specific Region Routines ***** {{{ */
+void mergePoints(int layer);
+void sortAllPoints();
 void printAllFinalTriangulation();
 void printMyFinalTriangulation();
 void storeMyFinalTriangulation();
@@ -423,10 +425,13 @@ int main(int argc, char **argv){
 			my_timers[1].start(); // Iteration Timer
 
 			clearRegions(my_regions);
+			clearRegions(regions);
 
 			my_timers[7].start(); // Sort Timer
 
-			sortPoints(sort_method, my_regions);
+//			sortPoints(sort_method, my_regions);
+			sortAllPoints();
+			mergePoints(1);
 
 			my_timers[7].stop(); // Sort Timer
 
@@ -1889,7 +1894,7 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 				}
 			}
 		}
-	}
+	} 
 #ifdef _DEBUG
 	cerr << "Done Sorting Points (Local) " << id << endl;
 #endif
@@ -2490,6 +2495,45 @@ void projectToBoundary(vector<region> &region_vec){/*{{{*/
 }/*}}}*/
 /* }}} */
 /* ***** Specifc Region Routines ***** {{{*/
+void mergePoints(int layer){/*{{{*/
+	int iLayer;
+
+	for(region_itr = my_regions.begin(); region_itr != my_regions.end(); ++region_itr){
+//		for(iLayer = 1; iLayer < layer; iLayer++){
+			for(neighbor_itr = (*region_itr).neighbors1.begin(); neighbor_itr != (*region_itr).neighbors1.end(); ++neighbor_itr){
+				for(point_itr = regions.at((*neighbor_itr)).points.begin(); point_itr != regions.at((*neighbor_itr)).points.end(); ++point_itr){
+					(*region_itr).points.push_back((*point_itr));
+				}
+			}
+
+//		}
+	}
+}/*}}}*/
+void sortAllPoints(){/*{{{*/
+#ifdef _DEBUG
+	cerr << "Sorting All Points " << id << endl;
+#endif
+	double val;
+	double min_val;
+	int min_region;
+
+	for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
+		min_val = M_PI;
+		for(region_itr = regions.begin(); region_itr != regions.end(); ++region_itr){
+			val = (*point_itr).dotForAngle((*region_itr).center);
+
+			if(val < min_val){
+				min_region = (*region_itr).center.idx;
+				min_val = val;
+			}
+		}
+		regions.at(min_region).points.push_back((*point_itr));
+	}
+#ifdef _DEBUG
+	cerr << "Done Sorting All Points (Local) " << id << endl;
+#endif
+	return;
+}/*}}}*/
 void printAllFinalTriangulation(){/*{{{*/
 	//Single processor version of printMyFinalTriangulation
 	vector<tri> temp_tris_out;
