@@ -278,6 +278,7 @@ void printMyFinalTriangulation();
 void storeMyFinalTriangulation();
 /*}}}*/
 /* ***** Communication Routines ***** {{{*/
+void reduceUpdatedPoints();
 void transferUpdatedPoints();
 void gatherAllUpdatedPoints();
 /*}}}*/
@@ -467,7 +468,8 @@ int main(int argc, char **argv){
 			my_timers[4].stop();
 			
 			my_timers[5].start(); // Communication Timer
-			transferUpdatedPoints();
+			reduceUpdatedPoints();
+			//transferUpdatedPoints();
 			my_timers[5].stop();
 
 			my_timers[6].start();
@@ -2587,6 +2589,55 @@ void storeMyFinalTriangulation(){/*{{{*/
 }/*}}}*/
 /*}}}*/
 /* ***** Communication Routines ***** {{{*/
+void reduceUpdatedPoints(){/*{{{*/
+	//Each processor transfers it's updated point set (stored in n_points) to it's region neighbors
+	//as defined in RegionTriangulation
+	//
+	//This keeps communications minimal and only updates the points that need to be updated for each region.
+	vector<pnt> temp_points_in;
+	vector<pnt> temp_points_out;
+	vector<mpi::request> comms;
+	optional options;
+
+#ifdef _DEBUG
+	cerr << "Transfering updated points " << id << endl;
+#endif
+
+	if(num_procs > 1){
+		temp_points_out.clear();
+		if(id == master) {
+			for(point_itr = n_points.begin(); point_itr != n_points.end(); ++point_itr){
+				points.at((*point_itr).idx) = (*point_itr);
+			}
+			for(int i = 1; i < num_procs; i++){
+				temp_points_in.clear();
+				world.recv(i, msg_points, temp_points_in);
+
+				for(point_itr = temp_points_in.begin(); point_itr != temp_points_in.end(); ++point_itr){
+					points.at((*point_itr).idx) = (*point_itr);
+				}
+
+				temp_points_in.clear();
+			}
+		} else {
+			for(point_itr = n_points.begin(); point_itr != n_points.end(); ++point_itr){
+				temp_points_out.push_back((*point_itr));
+			}
+			world.send(master, msg_points, temp_points_out);
+			temp_points_out.clear();
+		}
+
+		mpi::broadcast(world,points,master);
+	} else {
+		points.swap(n_points);
+	}
+
+	temp_points_in.clear();
+	temp_points_out.clear();
+#ifdef _DEBUG
+	cerr << "Done Transfering updated points " << id << endl;
+#endif
+}/*}}}*/
 void transferUpdatedPoints(){/*{{{*/
 	//Each processor transfers it's updated point set (stored in n_points) to it's region neighbors
 	//as defined in RegionTriangulation
