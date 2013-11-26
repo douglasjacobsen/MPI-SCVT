@@ -79,3 +79,5 @@ Output:
 	bisected_points.dat:
 		This file contains the bisected pointset from end_points.dat. For a full sphere grid, it should have
 		4*n - 6 points, where n is the number of points in end_points.dat. 
+
+[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/douglasjacobsen/mpi-scvt/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
