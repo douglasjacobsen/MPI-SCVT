@@ -180,6 +180,7 @@ int num_bisections = 0;
 int conv = 0;
 int restart = 0;
 int sort_method = sort_dot;
+int use_barycenter = 0;
 double min_bdry_angle = 1.0;
 double eps = 1.0E-10;
 double proj_alpha;
@@ -640,6 +641,8 @@ void readParamsFile(){/*{{{*/
 		pout << "1E-10" << endl;
 		pout << "What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point)" << endl;
 		pout << "2" << endl;
+		pout << "What integration point do you want to use for the center of a triangle? (0 - Circumcenter, 1 - Barycenter)" << endl;
+		pout << "0" << endl;
 		pout << "What sorting method do you want to use? (0 - dot product, 1 - voronoi)" << endl;
 		pout << "0" << endl;
 		pout << "What is the maximum allowable distance between boundary points? (Given in km)" << endl;
@@ -689,10 +692,12 @@ void readParamsFile(){/*{{{*/
 	params >> quad_rule;
 	params.ignore(10000,'\n');
 	getline(params,junk);
+	params >> use_barycenter;
+	params.ignore(10000,'\n');
+	getline(params,junk);
 	params >> sort_method;
 	params.ignore(10000,'\n');
 	getline(params,junk);
-// 	params >> min_bdry_angle;
 	params >> max_resolution;
 	params.ignore(10000,'\n');
 	getline(params,junk);
@@ -2056,8 +2061,13 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 			bc.normalize();
 			ca.normalize();
 
-			circumcenter(a,b,c,ccenter);
-			ccenter.normalize();
+			if(use_barycenter){
+				ccenter = (a+b+c)/3.0;
+				ccenter.normalize();
+			} else {
+				circumcenter(a,b,c,ccenter);
+				ccenter.normalize();
+			}
 
 			a_dist_to_region = a.dotForAngle((*region_itr).center);
 			b_dist_to_region = b.dotForAngle((*region_itr).center);

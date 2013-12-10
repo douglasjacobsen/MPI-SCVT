@@ -20,6 +20,8 @@ What do you want your convergence criteria to be? (eps = 1E-10)
 1E-10
 What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point)
 2
+What integration point do you want to use for the center of a triangle? (0 - Circumcenter, 1 - Barycenter)
+0
 What sorting method do you want to use? (0 - dot product, 1 - voronoi)
 0
 What is the maximum allowable distance between boundary points? (Given in km)
