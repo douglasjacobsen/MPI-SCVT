@@ -186,6 +186,9 @@ double min_bdry_angle = 1.0;
 double eps = 1.0E-10;
 double proj_alpha;
 double max_resolution = 4.0;
+double anneal_percent = 0.01;
+int anneal_its = 0;
+
 
 //gw: restart mode type and variable (move to a header?)
 enum restart_mode_type { RESTART_OVERWRITE, RESTART_RETAIN };
@@ -273,6 +276,7 @@ void computeMetrics(double &ave, double &max, double &l1);
 void clearRegions(vector<region> &region_vec);
 void makeFinalTriangulations(vector<region> &region_vec);
 void projectToBoundary(vector<region> &region_vec);
+void annealPoints(vector<region> &region_vec);
 /*}}}*/
 /* ***** Specific Region Routines ***** {{{ */
 void printAllFinalTriangulation();
@@ -430,6 +434,10 @@ int main(int argc, char **argv){
 			sortPoints(sort_method, my_regions);
 
 			my_timers[7].stop(); // Sort Timer
+
+			if(anneal_its > 0 && it%anneal_its == 0){
+				annealPoints(my_regions);
+			}
 
 			my_timers[2].start(); // Triangulation Timer
 
@@ -634,6 +642,8 @@ void readParamsFile(){/*{{{*/
 	max_resolution = atof(config.child("max_boundary_resolution").attribute("value").value());
 	temp_fileio_mode = config.child("file_io_mode").attribute("value").as_int();
 	temp_restart_mode = config.child("restart_file_handling").attribute("value").as_int();
+	anneal_percent = atof(config.child("max_annealing_percent").attribute("value").value());
+	anneal_its = config.child("annealing_frequency").attribute("value").as_int();
 
 	switch (temp_fileio_mode) {
 		case 0:
@@ -2390,6 +2400,24 @@ void projectToBoundary(vector<region> &region_vec){/*{{{*/
 			(*point_itr).z = p_n.z;
 			(*point_itr).idx = p_n.idx;
 			(*point_itr).isBdry = p_n.isBdry;
+		}
+	}
+
+}/*}}}*/
+void annealPoints(vector<region> &region_vec){/*{{{*/
+	double rand_x, rand_y, rand_z;
+
+	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
+		for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); point_itr++){
+			rand_x = drand48() * 2.0 * anneal_percent - anneal_percent;
+			rand_y = drand48() * 2.0 * anneal_percent - anneal_percent;
+			rand_z = drand48() * 2.0 * anneal_percent - anneal_percent;
+
+			(*point_itr).x = (*point_itr).x + rand_x;
+			(*point_itr).y = (*point_itr).y + rand_y;
+			(*point_itr).z = (*point_itr).z + rand_z;
+
+			(*point_itr).normalize();
 		}
 	}
 
