@@ -1,0 +1,79 @@
+<initial_point_set value="1"
+	possible_values="0, 1, 2, or 3"
+	description="Set to use for initial points. 0 - Read from SaveVertices, 1 - Monte Carlo, 2 - Generalized Spiral, 3 - Fibbonaci Grid"
+/>
+
+<number_of_generated_points value="162"
+	possible_values="Any positive integer"
+	description="If initial_point_set is set to anything other than 0, this defines the number of points that will be generated."
+/>
+
+<maximum_iterations value="1000"
+	possible_values="Any positive integer"
+	description="Maximum iterations to perform unless convergence criteria is met."
+/>
+
+<iterations_per_restart value="1000"
+	possible_values="Any positive integer"
+	description="Number of iterations to perform between writing restart files."
+/>
+
+<iterations_without_projection value="1000"
+	possible_values="Any positive integer"
+	description="The number of iterations our of maximum_iterations that will not have a boundary projection applied."
+/>
+
+<iterations_with_variable_projection value="0"
+	possible_values="Any positive integer"
+	description="Number of iterations to scale boundary projection from off to on over."
+/>
+
+<triangle_divisions value="1"
+	possible_values="Any positive integer greater than 0"
+	description="Number of subdivisions to perform on a triangle during integration. Subdivides a triangle into four triangles."
+/>
+
+<bisections value="0"
+	possible_values="Any positive integer"
+	description="Number of times the point set will be bisected after converging."
+/>
+
+<convergence_check value="0"
+	possible_values="0, 1, or 2"
+	description="Criteria to use for convergence check. 0 - Max Iterations, 1 - Average movement, 2 - Maximum movement"
+/>
+
+<convergence_criteria value="1E-10"
+	possible_values="Any positive real number"
+	description="Convergence criteria to use when convergence_check is 1 or 2."
+/>
+
+<quadrature_rule value="0"
+	possible_values="0, 1, 2, 3, 4 or 5"
+	description="Quadrature rule to use for triangle integration. 0 - Circumcenter, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point. Default is Circumcenter."
+/>
+
+<delaunay_triangle_center value="0"
+	possible_values="0 or 1"
+	description="Point to use for the center of Delaunay triangles when dividing for integration. 0 - Circumcenter, 1 - Barycenter."
+/>
+
+<sort_method value="0"
+	possible_values="0 or 1"
+	description="Method to use for sorting point set into regions. 0 - Dot product, 1 - Voronoi sort."
+/>
+
+<max_boundary_resolution value="40000.0"
+	possible_values="Any positive real number"
+	description="Maximum distance between boundary points."
+/>
+
+<file_io_mode value="0"
+	possible_values="0, 1, or 2"
+	description="Mode to use for I/O. 0 - ASCII, 1 - NetCDF, 2 - Both."
+/>
+
+<restart_file_handling value="0"
+	possible_values="0 or 1"
+	description="Method for handling restart files. 0 - Overwrite old files, 1 - Retain old files."
+/>

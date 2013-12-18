@@ -13,6 +13,7 @@ FLAGS = -O3 -m64 $(NCDF_FLAGS)
 DFLAGS = -g -m64 -D_DEBUG
 EXE=MpiScvt.x
 TRISRC=Triangle/
+XMLSRC=Pugixml/
 
 PLATFORM=_MACOS
 PLATFORM=_LINUX
@@ -29,11 +30,11 @@ endif
 
 TRILIBDEFS= -DTRILIBRARY
 
-all: trilibrary
-	${CC} scvt-mpi.cpp ${TRISRC}triangle.o ${LIBS} ${FLAGS} -o ${EXE}
+all: trilibrary pugixml-library
+	${CC} scvt-mpi.cpp ${TRISRC}triangle.o ${XMLSRC}pugixml.o ${LIBS} ${FLAGS} -o ${EXE}
 
-debug: trilibrary-debug
-	${CC} scvt-mpi.cpp ${TRISRC}triangle.o ${LIBS} ${DFLAGS} -o ${EXE}
+debug: trilibrary-debug pugixml-library-debug
+	${CC} scvt-mpi.cpp ${TRISRC}triangle.o ${XMLSRC}pugixml.o ${LIBS} ${DFLAGS} -o ${EXE}
 
 trilibrary:
 	$(CC) $(CSWITCHES) $(TRILIBDEFS) ${FLAGS} -c -o ${TRISRC}triangle.o ${TRISRC}triangle.c
@@ -41,5 +42,11 @@ trilibrary:
 trilibrary-debug:
 	$(CC) $(CSWITCHES) $(TRILIBDEFS) ${DFLAGS} -c -o ${TRISRC}triangle.o ${TRISRC}triangle.c
 
+pugixml-library:
+	$(CC) $(CSWITCHES) $(FLAGS) -c -o $(XMLSRC)pugixml.o $(XMLSRC)pugixml.cpp
+
+pugixml-library-debug:
+	$(CC) $(CSWITCHES) $(DFLAGS) -c -o $(XMLSRC)pugixml.o $(XMLSRC)pugixml.cpp
+
 clean:
-	rm -f *.dat ${EXE} ${TRISRC}triangle.o
+	rm -f *.dat ${EXE} ${TRISRC}triangle.o $(XMLSRC)/pugixml.o
