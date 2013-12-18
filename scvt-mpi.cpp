@@ -296,6 +296,8 @@ int writeRestartFileRetainNC( const int it, const vector<pnt> &points );
 int writeRestartFileOverwriteTXT( const int it );
 int writeRestartFileRetainTXT( const int it );
 double density(const pnt &p);
+double pop_lowres_density(const pnt &p);
+double pop_highres_density(const pnt &p);
 double ellipse_density(const pnt &p, double lat_c, double lon_c, double lat_width, double lon_width);
 /*}}}*/
 
@@ -2887,10 +2889,18 @@ double density(const pnt &p){/*{{{*/
 	return density;
 	// */
 	
-	// /* Ellipse density function.
+	/* Ellipse density function.
 	
 	return ellipse_density(p, 40.0, 0.0, 1.0, 0.5);
 	// */
+    
+    // /* Pop low resolution density function.
+    return pop_lowres_density(p);
+    // */
+    
+    // /* Pop high resolution density function. 
+    return pop_highres_density(p);
+    // */
 
 }/*}}}*/
 double ellipse_density(const pnt &p, double lat_c, double lon_c, double lat_width, double lon_width){/*{{{*/
@@ -2924,6 +2934,34 @@ double ellipse_density(const pnt &p, double lat_c, double lon_c, double lat_widt
 	return density;
 	// */
 
+}/*}}}*/
+double pop_lowres_density(const pnt &p){/*{{{*/
+    double dtr;
+    double density, gamma, lat, lat_cent, width;
+
+	dtr = M_PI/180.0;
+
+    lat_cent = 25.0 * dtr;
+    width = 6.0 * dtr;
+    gamma = powf(1.0 / 1.95, 4.0);
+    lat = p.getLat();
+
+    density = ((1.0-gamma) * (1.0 + tanh( (lat_cent - fabs(lat)) / width)) / 2.0) + gamma;
+
+    return density;
+}/*}}}*/
+double pop_highres_density(const pnt &p){/*{{{*/
+    double dtr;
+    double density, lat, gamma;
+
+    dtr = M_PI/180.0;
+
+    gamma = pow(1.0 / 3.0, 4);
+    lat = p.getLat();
+
+    density = (1-gamma) * pow( sin(lat), 4) + gamma;
+
+    return density;
 }/*}}}*/
 /*}}}*/
 
