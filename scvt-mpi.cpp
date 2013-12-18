@@ -2910,7 +2910,7 @@ int writeRestartFileRetainTXT( const int it ) {/*{{{*/
 
 double density(const pnt &p){/*{{{*/
 	//density returns the value of the density function at point p
-	//return 1.0; // Uniform density
+	return 1.0; // Uniform density
 
 	/* Density function for Shallow Water Test Case 5 
 	pnt cent;
