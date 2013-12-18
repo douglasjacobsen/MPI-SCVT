@@ -77,3 +77,13 @@
 	possible_values="0 or 1"
 	description="Method for handling restart files. 0 - Overwrite old files, 1 - Retain old files."
 />
+
+<max_annealing_percent value="0.01"
+	possible_values="Any positive real number between 0 and 1"
+	description="Percent to use when performing simulated annealing. Given as a fraction where 1.0 is 100%."
+/>
+
+<annealing_frequency value="0"
+	possible_values="Any positive integer"
+	description="Number of iterations between simulated annealing applications. 0 means no annealing."
+/>
