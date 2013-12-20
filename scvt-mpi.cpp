@@ -188,6 +188,7 @@ double proj_alpha;
 double max_resolution = 4.0;
 double anneal_percent = 0.01;
 int anneal_its = 0;
+int anneal_limit = 0;
 
 
 //gw: restart mode type and variable (move to a header?)
@@ -437,7 +438,7 @@ int main(int argc, char **argv){
 
 			my_timers[7].stop(); // Sort Timer
 
-			if(anneal_its > 0 && it%anneal_its == 0){
+			if(anneal_limit > 0 && anneal_its > 0 && it < anneal_limit && it%anneal_its == 0){
 				annealPoints(my_regions);
 			}
 
@@ -646,6 +647,7 @@ void readParamsFile(){/*{{{*/
 	temp_restart_mode = config.child("restart_file_handling").attribute("value").as_int();
 	anneal_percent = atof(config.child("max_annealing_percent").attribute("value").value());
 	anneal_its = config.child("annealing_frequency").attribute("value").as_int();
+	anneal_limit = config.child("max_annealing_iterations").attribute("value").as_int();
 
 	switch (temp_fileio_mode) {
 		case 0:

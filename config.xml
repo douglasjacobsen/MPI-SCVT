@@ -87,3 +87,8 @@
 	possible_values="Any positive integer"
 	description="Number of iterations between simulated annealing applications. 0 means no annealing."
 />
+
+<max_annealing_iterations value="0"
+	possible_values="Any positive integer"
+	description="The maximum number of iterations annealing should be allowed to happen on."
+/>
