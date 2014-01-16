@@ -96,12 +96,12 @@ class region{/*{{{*/
 		pnt center;
 		double radius;
 		double input_radius;
-		vector<pnt> points;
+		vector<pnt*> points;
 		vector<tri> triangles;
 		vector<int> neighbors; // First Level of Neighbors
 		vector<int> neighbors1; // First Level of Neighbors + Self
 		vector<int> neighbors2; // Second Level of Neighbors + First Level of Neighbors + Self
-		vector<pnt> boundary_points;
+		vector<pnt*> boundary_points;
 		vector<int> loop_start; // beginning point in loop
 		vector<int> loop_stop; // ending point in loop
 };/*}}}*/
@@ -219,9 +219,11 @@ string global_names[num_global_timers] = {"Global Time", "Final Gather", "Final 
 vector<pnt> points;
 vector<pnt> n_points;
 vector<pnt>::iterator point_itr;
+vector<pnt*>::iterator reg_point_itr;
 
 vector<pnt> boundary_points;
 vector<pnt>::iterator boundary_itr;
+vector<pnt*>::iterator reg_boundary_itr;
 
 vector<int> loop_start;
 vector<int> loop_stop;
@@ -1744,7 +1746,7 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 				val = (*point_itr).dotForAngle((*region_itr).center);	
 
 				if(val < (*region_itr).radius){
-					(*region_itr).points.push_back((*point_itr));
+					(*region_itr).points.push_back(&(*point_itr));
 				} 
 			}
 		}
@@ -1779,7 +1781,7 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 					added = 0;
 
 					if(min_region == (*region_itr).center.idx){
-						(*region_itr).points.push_back((*point_itr));
+						(*region_itr).points.push_back(&(*point_itr));
 						added = 1;
 					}
 					for(neighbor_itr = (*region_itr).neighbors1.begin(); 
@@ -1789,7 +1791,7 @@ void sortPoints(int sort_type, vector<region> &region_vec){/*{{{*/
 							val = (*region_itr).center.dotForAngle(regions[min_region].center);
 
 							if(my_val < val) {
-								(*region_itr).points.push_back((*point_itr));
+								(*region_itr).points.push_back(&(*point_itr));
 							}
 
 							added = 1;
@@ -1833,7 +1835,7 @@ void sortBoundaryPoints(vector<region> &region_vec){/*{{{*/
 
 		for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
 			if((*region_itr).center.idx == index){
-				(*region_itr).boundary_points.push_back((*point_itr));
+				(*region_itr).boundary_points.push_back(&(*point_itr));
 			}
 		}
 	}
@@ -1902,9 +1904,9 @@ void triangulateRegions(vector<region> &region_vec){/*{{{*/
 
 		i = 0;
 
-		for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); ++point_itr){
-			s = 2.0/(*region_itr).center.dot((*point_itr) + (*region_itr).center);
-			Q = s*(*point_itr) + (s - 1.0) * (*region_itr).center;
+		for(reg_point_itr = (*region_itr).points.begin(); reg_point_itr != (*region_itr).points.end(); ++reg_point_itr){
+			s = 2.0/(*region_itr).center.dot((**reg_point_itr) + (*region_itr).center);
+			Q = s*(**reg_point_itr) + (s - 1.0) * (*region_itr).center;
 			in.pointlist[2*i] = x_hat.dot(Q);
 			in.pointlist[2*i+1] = y_hat.dot(Q);
 
@@ -1921,13 +1923,13 @@ void triangulateRegions(vector<region> &region_vec){/*{{{*/
 			vi2 = out.trianglelist[3*i+1];
 			vi3 = out.trianglelist[3*i+2];
 
-			a = (*region_itr).points.at(vi1);
-			b = (*region_itr).points.at(vi2);
-			c = (*region_itr).points.at(vi3);
+			a = (*(*region_itr).points.at(vi1));
+			b = (*(*region_itr).points.at(vi2));
+			c = (*(*region_itr).points.at(vi3));
 
 			if(!isCcw(a,b,c)){
-				b = (*region_itr).points.at(vi3);
-				c = (*region_itr).points.at(vi2);
+				b = (*(*region_itr).points.at(vi3));
+				c = (*(*region_itr).points.at(vi2));
 			}
 
 			vi1 = a.idx;
@@ -2229,9 +2231,9 @@ void makeFinalTriangulations(vector<region> &region_vec){/*{{{*/
 		y_hat.normalize();
 
 		i = 0;
-		for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); ++point_itr){
-			s = 2.0/(*region_itr).center.dot((*point_itr) + (*region_itr).center);
-			Q = s*(*point_itr) + (s - 1.0) * (*region_itr).center;
+		for(reg_point_itr = (*region_itr).points.begin(); reg_point_itr != (*region_itr).points.end(); ++reg_point_itr){
+			s = 2.0/(*region_itr).center.dot((**reg_point_itr) + (*region_itr).center);
+			Q = s*(**reg_point_itr) + (s - 1.0) * (*region_itr).center;
 			in.pointlist[2*i] = x_hat.dot(Q);
 			in.pointlist[2*i+1] = y_hat.dot(Q);
 			i++;
@@ -2247,13 +2249,13 @@ void makeFinalTriangulations(vector<region> &region_vec){/*{{{*/
 			vi2 = out.trianglelist[3*i+1];
 			vi3 = out.trianglelist[3*i+2];
 
-			a = (*region_itr).points.at(vi1);
-			b = (*region_itr).points.at(vi2);
-			c = (*region_itr).points.at(vi3);
+			a = (*(*region_itr).points.at(vi1));
+			b = (*(*region_itr).points.at(vi2));
+			c = (*(*region_itr).points.at(vi3));
 
 			if(!isCcw(a,b,c)){
-				b = (*region_itr).points.at(vi3);
-				c = (*region_itr).points.at(vi2);
+				b = (*(*region_itr).points.at(vi3));
+				c = (*(*region_itr).points.at(vi2));
 			}
 
 			vi1 = a.idx;
@@ -2310,15 +2312,15 @@ void projectToBoundary(vector<region> &region_vec){/*{{{*/
 	}
 
 	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
-		for(boundary_itr = (*region_itr).boundary_points.begin(); boundary_itr != (*region_itr).boundary_points.end(); boundary_itr++){
+		for(reg_boundary_itr = (*region_itr).boundary_points.begin(); reg_boundary_itr != (*region_itr).boundary_points.end(); reg_boundary_itr++){
 
 			min_dist = M_PI;
 			for(point_itr = n_points.begin(); point_itr != n_points.end(); point_itr++){
-				dist = (*boundary_itr).dotForAngle((*point_itr));
+				dist = (**reg_boundary_itr).dotForAngle((*point_itr));
 
 				if(dist < min_dist){
 					min_dist = dist;
-					closest_cell.at((*boundary_itr).idx) = (*point_itr).idx;
+					closest_cell.at((**reg_boundary_itr).idx) = (*point_itr).idx;
 				}
 			}
 
@@ -2412,16 +2414,16 @@ void annealPoints(vector<region> &region_vec){/*{{{*/
 	double rand_x, rand_y, rand_z;
 
 	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
-		for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); point_itr++){
+		for(reg_point_itr = (*region_itr).points.begin(); reg_point_itr != (*region_itr).points.end(); reg_point_itr++){
 			rand_x = drand48() * 2.0 * anneal_percent - anneal_percent;
 			rand_y = drand48() * 2.0 * anneal_percent - anneal_percent;
 			rand_z = drand48() * 2.0 * anneal_percent - anneal_percent;
 
-			(*point_itr).x = (*point_itr).x + rand_x;
-			(*point_itr).y = (*point_itr).y + rand_y;
-			(*point_itr).z = (*point_itr).z + rand_z;
+			(**reg_point_itr).x = (**reg_point_itr).x + rand_x;
+			(**reg_point_itr).y = (**reg_point_itr).y + rand_y;
+			(**reg_point_itr).z = (**reg_point_itr).z + rand_z;
 
-			(*point_itr).normalize();
+			(**reg_point_itr).normalize();
 		}
 	}
 
