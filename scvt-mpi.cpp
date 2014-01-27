@@ -2889,7 +2889,7 @@ int writeRestartFileRetainNC( const int it, const vector<pnt> &points ) {/*{{{*/
 int writeRestartFileOverwriteTXT( const int it ) {/*{{{*/
 
 	char temp[32];
-	sprintf(temp,"point_restart.dat\0");
+	sprintf(temp,"point_restart.dat");
 
 	ofstream pts_out(temp);
 
@@ -2903,7 +2903,7 @@ int writeRestartFileOverwriteTXT( const int it ) {/*{{{*/
 int writeRestartFileRetainTXT( const int it ) {/*{{{*/
 	
 	char temp[32];
-	sprintf(temp,"point_restart_%d.dat\0",it);
+	sprintf(temp,"point_restart_%d.dat",it);
 
 	ofstream pts_out(temp);
 
