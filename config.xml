@@ -92,3 +92,8 @@
 	possible_values="Any positive integer"
 	description="The maximum number of iterations annealing should be allowed to happen on."
 />
+
+<anneal_when_stagnant value="1"
+	possible_values="0, 1, or 2"
+	description="Forces an annealing whenever convergence criteria becomes stagnant. 0 - off, 1 - Ave, 2 - Max"
+/>

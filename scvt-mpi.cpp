@@ -189,6 +189,7 @@ double max_resolution = 4.0;
 double anneal_percent = 0.01;
 int anneal_its = 0;
 int anneal_limit = 0;
+int anneal_on = 0;
 
 
 //gw: restart mode type and variable (move to a header?)
@@ -305,11 +306,12 @@ double ellipse_density(const pnt &p, double lat_c, double lon_c, double lat_widt
 int main(int argc, char **argv){
 	int bisection;
 	int it, i;
-	int stop, do_proj;
+	int stop, force_anneal, do_proj;
 	int ave_points, my_points;
 	mpi::request *ave_comms, *max_comms, *l1_comms;
 	double *my_ave, *my_max, *my_l1;
 	double glob_ave, glob_max, glob_l1;
+	double last_glob_ave, last_glob_max, last_glob_l1;
 	optional ave_opti, max_opti, l1_opti;
 	pnt p;
 
@@ -332,6 +334,11 @@ int main(int argc, char **argv){
 	ave_comms = new mpi::request[num_procs];
 	max_comms = new mpi::request[num_procs];
 	l1_comms = new mpi::request[num_procs];
+
+	last_glob_ave = 1.0;
+	last_glob_max = 1.0;
+	last_glob_l1 = 1.0;
+	force_anneal = 0;
 
 	// Read in parameters and regions. Setup initial point set
 	if(id == master){
@@ -378,6 +385,11 @@ int main(int argc, char **argv){
 	mpi::broadcast(world,conv,master);
 	mpi::broadcast(world,eps,master);
 	mpi::broadcast(world,quad_rule,master);
+	mpi::broadcast(world,use_barycenter,master);
+	mpi::broadcast(world,anneal_percent,master);
+	mpi::broadcast(world,anneal_its,master);
+	mpi::broadcast(world,anneal_limit,master);
+	mpi::broadcast(world,anneal_on,master);
 	mpi::broadcast(world,regions,master);
 	mpi::broadcast(world,points,master);
 	mpi::broadcast(world,boundary_points,master);
@@ -438,8 +450,11 @@ int main(int argc, char **argv){
 
 			my_timers[7].stop(); // Sort Timer
 
-			if(anneal_limit > 0 && anneal_its > 0 && it < anneal_limit && it%anneal_its == 0){
-				annealPoints(my_regions);
+			if(anneal_limit > 0 && it < anneal_limit){
+				if(force_anneal || (anneal_its > 0 && it%anneal_its == 0)){
+					annealPoints(my_regions);
+					if(force_anneal) force_anneal = 0;
+				}
 			}
 
 			my_timers[2].start(); // Triangulation Timer
@@ -515,9 +530,20 @@ int main(int argc, char **argv){
 					cout << "Converged on maximum movement." << endl;
 					stop = 1;
 				}
+
+				if(anneal_on == 1 && fabs(glob_ave - last_glob_ave)/glob_ave < 1E-8) {
+					force_anneal = 1;
+				} else if(anneal_on == 2 && fabs(glob_max - last_glob_max)/glob_max < 1E-8) {
+					force_anneal = 1;
+				}
+
+				last_glob_ave = glob_ave;
+				last_glob_max = glob_max;
+				last_glob_l1 = glob_l1;
 			}
 
 			mpi::broadcast(world,stop,master);
+			mpi::broadcast(world,force_anneal,master);
 			my_timers[6].stop();
 			my_timers[1].stop();
 			
@@ -648,6 +674,7 @@ void readParamsFile(){/*{{{*/
 	anneal_percent = atof(config.child("max_annealing_percent").attribute("value").value());
 	anneal_its = config.child("annealing_frequency").attribute("value").as_int();
 	anneal_limit = config.child("max_annealing_iterations").attribute("value").as_int();
+	anneal_on = config.child("anneal_when_stagnant").attribute("value").as_int();
 
 	switch (temp_fileio_mode) {
 		case 0:
