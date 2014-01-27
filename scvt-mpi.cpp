@@ -190,6 +190,7 @@ double anneal_percent = 0.01;
 int anneal_its = 0;
 int anneal_limit = 0;
 int anneal_on = 0;
+int anneal_shape_control = 0;
 
 
 //gw: restart mode type and variable (move to a header?)
@@ -390,6 +391,7 @@ int main(int argc, char **argv){
 	mpi::broadcast(world,anneal_its,master);
 	mpi::broadcast(world,anneal_limit,master);
 	mpi::broadcast(world,anneal_on,master);
+	mpi::broadcast(world,anneal_shape_control,master);
 	mpi::broadcast(world,regions,master);
 	mpi::broadcast(world,points,master);
 	mpi::broadcast(world,boundary_points,master);
@@ -675,6 +677,7 @@ void readParamsFile(){/*{{{*/
 	anneal_its = config.child("annealing_frequency").attribute("value").as_int();
 	anneal_limit = config.child("max_annealing_iterations").attribute("value").as_int();
 	anneal_on = config.child("anneal_when_stagnant").attribute("value").as_int();
+	anneal_shape_control = config.child("anneal_only_non_hexagons").attribute("value").as_int();
 
 	switch (temp_fileio_mode) {
 		case 0:
@@ -1981,6 +1984,7 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 	// This ensures that each point is only updated once.
 	pnt *tops;
 	double *bots;
+	int *sides;
 	int vi1, vi2, vi3;
 	pnt a, b, c;
 	pnt ab, bc, ca;
@@ -2001,10 +2005,12 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 
 	tops = new pnt[points.size()];
 	bots = new double[points.size()];
+	sides = new int[points.size()];
 
 	for(i = 0; i < points.size(); i++){
 		tops[i] = pnt(0.0,0.0,0.0,0,i);
 		bots[i] = 0.0;
+		sides[i] = 0;
 	}
 
 	i = 0;
@@ -2018,6 +2024,10 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 			a = points[vi1];
 			b = points[vi2];
 			c = points[vi3];
+
+			sides[vi1]++;
+			sides[vi2]++;
+			sides[vi3]++;
 
 			ab = (a+b)/2.0;
 			bc = (b+c)/2.0;
@@ -2137,6 +2147,7 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 			if(!(*point_itr).isBdry){
 				np = tops[(*point_itr).idx]/bots[(*point_itr).idx];
 				np.idx = (*point_itr).idx;
+				np.sides = sides[(*point_itr).idx];
 				np.isBdry = (*point_itr).isBdry;
 				np.normalize();
 				n_points.push_back(np);
@@ -2440,15 +2451,29 @@ void annealPoints(vector<region> &region_vec){/*{{{*/
 
 	for(region_itr = region_vec.begin(); region_itr != region_vec.end(); region_itr++){
 		for(point_itr = (*region_itr).points.begin(); point_itr != (*region_itr).points.end(); point_itr++){
-			rand_x = drand48() * 2.0 * anneal_percent - anneal_percent;
-			rand_y = drand48() * 2.0 * anneal_percent - anneal_percent;
-			rand_z = drand48() * 2.0 * anneal_percent - anneal_percent;
+			if(anneal_shape_control == 1){
+				if((*point_itr).sides != 6){
+					rand_x = drand48() * 2.0 * anneal_percent - anneal_percent;
+					rand_y = drand48() * 2.0 * anneal_percent - anneal_percent;
+					rand_z = drand48() * 2.0 * anneal_percent - anneal_percent;
 
-			(*point_itr).x = (*point_itr).x + rand_x;
-			(*point_itr).y = (*point_itr).y + rand_y;
-			(*point_itr).z = (*point_itr).z + rand_z;
+					(*point_itr).x = (*point_itr).x + rand_x;
+					(*point_itr).y = (*point_itr).y + rand_y;
+					(*point_itr).z = (*point_itr).z + rand_z;
 
-			(*point_itr).normalize();
+					(*point_itr).normalize();
+				}
+			} else {
+				rand_x = drand48() * 2.0 * anneal_percent - anneal_percent;
+				rand_y = drand48() * 2.0 * anneal_percent - anneal_percent;
+				rand_z = drand48() * 2.0 * anneal_percent - anneal_percent;
+
+				(*point_itr).x = (*point_itr).x + rand_x;
+				(*point_itr).y = (*point_itr).y + rand_y;
+				(*point_itr).z = (*point_itr).z + rand_z;
+
+				(*point_itr).normalize();
+			}
 		}
 	}
 
@@ -2892,7 +2917,7 @@ int writeRestartFileRetainTXT( const int it ) {/*{{{*/
 
 double density(const pnt &p){/*{{{*/
 	//density returns the value of the density function at point p
-	return 1.0; // Uniform density
+	//return 1.0; // Uniform density
 
 	/* Density function for Shallow Water Test Case 5 
 	pnt cent;
@@ -2923,7 +2948,7 @@ double density(const pnt &p){/*{{{*/
 	return ellipse_density(p, 40.0, 0.0, 1.0, 0.5);
 	// */
     
-    // /* Pop low resolution density function.
+    /* Pop low resolution density function.
     return pop_lowres_density(p);
     // */
     

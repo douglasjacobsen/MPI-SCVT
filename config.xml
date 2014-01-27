@@ -97,3 +97,8 @@
 	possible_values="0, 1, or 2"
 	description="Forces an annealing whenever convergence criteria becomes stagnant. 0 - off, 1 - Ave, 2 - Max"
 />
+
+<anneal_only_non_hexagons value="0"
+	possible_values="0 or 1"
+	description="When performing annealing, 0 - Anneal all cell centers, 1 - anneal non-hexagons."
+/>
