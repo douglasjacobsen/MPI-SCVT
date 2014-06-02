@@ -33,8 +33,6 @@ class pnt {/*{{{*/
 		int projTo;
 		int isBdry;
 		int idx;
-		int sides;
-		int annealable;
 
 
 		pnt(double x_, double y_, double z_, int isBdry_, int idx_, int projTo_)
