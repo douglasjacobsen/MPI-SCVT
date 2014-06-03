@@ -42,7 +42,6 @@
 #include <boost/serialization/vector.hpp>
 
 #include "Triangle/triangle.h"
-#include "Pugixml/pugixml.hpp"
 #include "triangulation.h"
 
 #define SEED	3729
@@ -621,34 +620,103 @@ int main(int argc, char **argv){
 void readParamsFile(){/*{{{*/
 	//Read in parameters from Params.
 	//If Params doesn't exist, write out Params with a default set of parameters
+	string junk;
+	ifstream params("Params");
 	int temp_restart_mode;
 	int temp_fileio_mode;
 
-	pugi::xml_document config;
-	pugi::xml_parse_result result = config.load_file("config.xml");
+	if(!params){
+		cout << "Error opening Params file." << endl;
+		cout << "Writing a default Params file." << endl;
+		cout << "Exiting, please set up Params, and rerun." << endl;
+		ofstream pout("Params");
+		pout << "How do you want the points created? (0 - Read from SaveVertices.dat, 1 - Monte Carlo, 2 - Generalized Spiral, 3 - Fibonacci Grid Points)" << endl;
+		pout << "0" << endl;
+		pout << "If you want them generated, how many points do you want?" << endl;
+		pout << "162" << endl;
+		pout << "How many iterations do you want to run for, if convergence isn't reached?" << endl;
+		pout << "1000" << endl;
+		pout << "How often, in iterations, do you want the point set written to a file? (Longer is better)" << endl << 500 << endl;
+		pout << "How many iterations do you want to run without projection onto the boundary?" << endl;
+		pout << "10000" << endl;
+		pout << "How many iterations do you want with a variable projection distance? (Minimum of 1)" << endl;
+		pout << "0" << endl;
+		pout << "How many sub-triangle divisions would you like? (Minimum of 1, Causes every triangle to be divided into 4^n triangles)" << endl;
+		pout << "1" << endl;
+		pout << "How many bisections do you want until your final point set? (Each bisection maps n -> 4*n-6)" << endl;
+		pout << "0" << endl;
+		pout << "What do you want to check convergence on? (0 - Max Iterations, "
+			 << "1 - Average Generator Movement, 2 - Maximum Generator Movement)" << endl;
+		pout << "0" << endl;
+		pout << "What do you want your convergence criteria to be? (eps = 1E-10)" << endl;
+		pout << "1E-10" << endl;
+		pout << "What Quadrature Rule do you want to use? (0 - Centroid, 1 - Vertex, 2 - Midpoint, 3 - 7 Point, 4 - 13 Point, 5 - 19 Point)" << endl;
+		pout << "2" << endl;
+		pout << "What integration point do you want to use for the center of a triangle? (0 - Circumcenter, 1 - Barycenter)" << endl;
+		pout << "0" << endl;
+		pout << "What sorting method do you want to use? (0 - dot product, 1 - voronoi)" << endl;
+		pout << "0" << endl;
+		pout << "What is the maximum allowable distance between boundary points? (Given in km)" << endl;
+		pout << "4.0" << endl;
+		pout << "Which format for restart files would you like? (0 - text, 1 - netcdf, 2 - both, 0 will be selected if netcdf is not linked)" << endl;
+		pout << "0" << endl;
+		pout << "Would you like one restart file, or a series? (0 - overwrite, 1 - retain, ignored if restart files are disabled above)" << endl;
+		pout << "0" << endl;
 
-	cout << result.description() << endl;
-
-	points_begin = config.child("initial_point_set").attribute("value").as_int();
-	num_pts = config.child("number_of_generated_points").attribute("value").as_int();
-	max_it = config.child("maximum_iterations").attribute("value").as_int();
-	restart = config.child("iterations_per_restart").attribute("value").as_int();
-	max_it_no_proj = config.child("iterations_without_projection").attribute("value").as_int();
-	max_it_scale_alpha = config.child("iterations_with_variable_projection").attribute("value").as_int();
-	div_levs = std::max(1, config.child("triangle_divisions").attribute("value").as_int());
-	num_bisections = config.child("bisections").attribute("value").as_int();
-	conv = config.child("convergence_check").attribute("value").as_int();
-	eps = atof(config.child("convergence_criteria").attribute("value").value());
-	quad_rule = config.child("quadrature_rule").attribute("value").as_int();
-	use_barycenter = config.child("delaunay_triangle_center").attribute("value").as_int();
-	sort_method = config.child("sort_method").attribute("value").as_int();
-	max_resolution = atof(config.child("max_boundary_resolution").attribute("value").value());
-	temp_fileio_mode = config.child("file_io_mode").attribute("value").as_int();
-	temp_restart_mode = config.child("restart_file_handling").attribute("value").as_int();
-	anneal_percent = atof(config.child("max_annealing_percent").attribute("value").value());
-	anneal_its = config.child("annealing_frequency").attribute("value").as_int();
-	anneal_limit = config.child("max_annealing_iterations").attribute("value").as_int();
-
+		pout.close();
+		exit(1);
+	}
+	
+	getline(params,junk);
+	params >> points_begin;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> num_pts;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> max_it;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> restart;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> max_it_no_proj;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> max_it_scale_alpha;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> div_levs;
+	div_levs = std::max(1,div_levs);
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> num_bisections;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> conv;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> eps;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> quad_rule;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> use_barycenter;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> sort_method;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> max_resolution;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> temp_fileio_mode;
+	params.ignore(10000,'\n');
+	getline(params,junk);
+	params >> temp_restart_mode;
+	params.ignore(10000,'\n');
+	
 	switch (temp_fileio_mode) {
 		case 0:
 			fileio_mode = FILEIO_TXT;
@@ -676,6 +744,9 @@ void readParamsFile(){/*{{{*/
 			exit(1);
 	}
 
+// 	min_bdry_angle = min_bdry_angle * M_PI/180.0;
+
+	params.close();
 }/*}}}*/
 void readBoundaries(){/*{{{*/
 	int i, j, n_pts;
