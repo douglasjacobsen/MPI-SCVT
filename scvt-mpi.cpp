@@ -296,6 +296,7 @@ int writeRestartFileRetainNC( const int it, const vector<pnt> &points );
 int writeRestartFileOverwriteTXT( const int it );
 int writeRestartFileRetainTXT( const int it );
 double density(const pnt &p);
+double weddell_sea_density(const pnt &p);
 double southern_ocean_density(const pnt &p);
 double pop_lowres_density(const pnt &p);
 double pop_highres_density(const pnt &p);
@@ -2968,6 +2969,10 @@ double density(const pnt &p){/*{{{*/
 	return ellipse_density(p, 40.0, 0.0, 1.0, 0.5);
 	// */
 
+	// /* Southern ocean density function with refined weddell sea area
+	return weddell_sea_density(p);
+	// */
+
 	// /* Southern ocean density function
 	return southern_ocean_density(p);
 	// */
@@ -3012,6 +3017,85 @@ double ellipse_density(const pnt &p, double lat_c, double lon_c, double lat_widt
 	return density;
 	// */
 
+}/*}}}*/
+double weddell_sea_density(const pnt &p){/*{{{*/
+    double dtr;
+    double density, lat, lon;
+
+	pnt weddellCent;
+
+	double cellWidthLL, cellWidthML, cellWidthHL, cellWidthSO;
+	double densityLL, densityML, densityHL, densitySO;
+	double minCellWidth;
+	double latStepFunction, lat_centLL, lat_centHL, lat_centSO;
+	double widthLL, widthHL, widthSO;
+	double dLat, dLatRadians;
+	double weddellLat, weddellLon;
+	double weddellScaleWidth, weddellTransitionWidth;
+	double distance;
+	double weddellRho;
+
+	dtr = M_PI/180.0;
+
+	//Here is the key to variable names:
+	//LL low latitude
+	//ML mid latitude
+	//HL high latitude
+
+	cellWidthLL = 30.0;
+	cellWidthML = 70.0;
+	cellWidthHL = 35.0;
+	cellWidthSO = 6.0; // Reasonable values are 24, 12, and 6
+	minCellWidth = min( min(cellWidthLL, min(cellWidthML, cellWidthHL)), cellWidthSO);
+
+	lat = p.getLat(); // Latitude of point to compute density for
+	lon = p.getLon(); // Longitude of point to compute density for
+
+	dLat = 0.1;
+	dLatRadians = dLat*dtr;
+
+	latStepFunction = 40.0 * dtr; // Latitude to change from LL to HL function
+
+	lat_centLL = 15.0 * dtr; // In Radians - Position of center of transition region
+	lat_centHL = 73.0 * dtr; // In Radians - Position of center of transition region
+	lat_centSO = -35.0 * dtr; // In Radians - Position of center of transition region
+
+	weddellLat = -74.0 * dtr;
+	weddellLon = 320.0 * dtr;
+	weddellCent = pntFromLatLon(weddellLat, weddellLon);
+	weddellCent.normalize();
+	weddellScaleWidth = 0.118; // 7.5e5 m
+	weddellTransitionWidth = 0.0118; // 7.5e4 m
+
+	distance = p.dotForAngle(weddellCent);
+
+	widthLL = 6.0 * dtr; // In Radians - Width of transition region
+	widthHL = 9.0 * dtr; // In Radians - Width of transition region
+	widthSO = 6.0 * dtr; // In Radians - Width of transition region
+
+	densityLL = powf(minCellWidth/cellWidthLL, 4);
+	densityML = powf(minCellWidth/cellWidthML, 4);
+	densityHL = powf(minCellWidth/cellWidthHL, 4);
+	densitySO = powf(minCellWidth/cellWidthSO, 4);
+
+	if ( lat > 0.0 ) {
+		if ( fabs(lat) < latStepFunction) {
+			density = ((densityLL-densityML) * (1.0 + tanh( (lat_centLL - fabs(lat))/ widthLL)) / 2.0) + densityML;
+		} else {
+			density = ((densityML-densityHL) * (1.0 + tanh( (lat_centHL - fabs(lat))/ widthHL)) / 2.0) + densityHL;
+		}
+	} else {
+		density = ((densitySO-densityLL) * (1.0 + tanh( (lat_centSO - lat)/ widthSO)) / 2.0) + densityLL;
+	}
+
+//	weddellRho = powf(4, 4) * tanh( ( weddellScaleWidth - distance ) / weddellTransitionWidth );
+	weddellRho = 256.0 * tanh( ( weddellScaleWidth - distance ) / weddellTransitionWidth );
+
+	if ( weddellRho > 0.01 ) {
+		density = density + weddellRho;
+	}
+
+	return density;
 }/*}}}*/
 double southern_ocean_density(const pnt &p){/*{{{*/
     double dtr;
