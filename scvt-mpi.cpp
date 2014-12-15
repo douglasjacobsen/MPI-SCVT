@@ -2029,135 +2029,141 @@ void integrateRegions(vector<region> &region_vec){/*{{{*/
 			sides[vi2]++;
 			sides[vi3]++;
 
-			ab = (a+b)/2.0;
-			bc = (b+c)/2.0;
-			ca = (c+a)/2.0;
+			if ( !a.isBdry || !b.isBdry || !c.isBdry ) {
+				ab = (a+b)/2.0;
+				bc = (b+c)/2.0;
+				ca = (c+a)/2.0;
 
-			ab.normalize();
-			bc.normalize();
-			ca.normalize();
+				ab.normalize();
+				bc.normalize();
+				ca.normalize();
 
-			if(use_barycenter){
-				ccenter = (a+b+c)/3.0;
-				ccenter.normalize();
-			} else {
-				circumcenter(a,b,c,ccenter);
-				ccenter.normalize();
-			}
-
-			a_dist_to_region = a.dotForAngle((*region_itr).center);
-			b_dist_to_region = b.dotForAngle((*region_itr).center);
-			c_dist_to_region = c.dotForAngle((*region_itr).center);
-
-			a_min_dist = 10.0;
-			b_min_dist = 10.0;
-			c_min_dist = 10.0;
-
-			for(neighbor_itr = (*region_itr).neighbors.begin(); neighbor_itr != (*region_itr).neighbors.end(); ++neighbor_itr){
-				if(regions[(*neighbor_itr)].center.idx != (*region_itr).center.idx){
-					dist_temp = a.dotForAngle(regions[(*neighbor_itr)].center);
-					if(a_min_dist > dist_temp){
-						a_min_dist = dist_temp;
-						a_min_region = (*neighbor_itr);
-					}
-					dist_temp = b.dotForAngle(regions[(*neighbor_itr)].center);
-					if(b_min_dist > dist_temp){
-						b_min_dist = dist_temp;
-						b_min_region = (*neighbor_itr);
-					}
-					dist_temp = c.dotForAngle(regions[(*neighbor_itr)].center);
-					if(c_min_dist > dist_temp){
-						c_min_dist = dist_temp;
-						c_min_region = (*neighbor_itr);
+				if(use_barycenter){
+					ccenter = (a+b+c)/3.0;
+					ccenter.normalize();
+				} else {
+					try {
+						circumcenter(a,b,c,ccenter);
+						ccenter.normalize();
+					} catch ( int n ) {
+						ccenter = (a + b + c) / 3.0;	
 					}
 				}
-			}
 
-			if(a_dist_to_region < a_min_dist){
-				//Triangle 1 - a ab ccenter
-				divideIntegrate(div_levs,a,ab,ccenter,top_val,bot_val);
-				tops[a.idx] += top_val;
-				bots[a.idx] += bot_val;
+				a_dist_to_region = a.dotForAngle((*region_itr).center);
+				b_dist_to_region = b.dotForAngle((*region_itr).center);
+				c_dist_to_region = c.dotForAngle((*region_itr).center);
 
-				//Triangle 2 - a ccenter ca
-				divideIntegrate(div_levs,a,ccenter,ca,top_val,bot_val);
-				tops[a.idx] += top_val;
-				bots[a.idx] += bot_val;
-			} else if (a_dist_to_region == a_min_dist && (*region_itr).center.idx < a_min_region){
-				//Triangle 1 - a ab ccenter
-				divideIntegrate(div_levs,a,ab,ccenter,top_val,bot_val);
-				tops[a.idx] += top_val;
-				bots[a.idx] += bot_val;
+				a_min_dist = 10.0;
+				b_min_dist = 10.0;
+				c_min_dist = 10.0;
 
-				//Triangle 2 - a ccenter ca
-				divideIntegrate(div_levs,a,ccenter,ca,top_val,bot_val);
-				tops[a.idx] += top_val;
-				bots[a.idx] += bot_val;
-			}
+				for(neighbor_itr = (*region_itr).neighbors.begin(); neighbor_itr != (*region_itr).neighbors.end(); ++neighbor_itr){
+					if(regions[(*neighbor_itr)].center.idx != (*region_itr).center.idx){
+						dist_temp = a.dotForAngle(regions[(*neighbor_itr)].center);
+						if(a_min_dist > dist_temp){
+							a_min_dist = dist_temp;
+							a_min_region = (*neighbor_itr);
+						}
+						dist_temp = b.dotForAngle(regions[(*neighbor_itr)].center);
+						if(b_min_dist > dist_temp){
+							b_min_dist = dist_temp;
+							b_min_region = (*neighbor_itr);
+						}
+						dist_temp = c.dotForAngle(regions[(*neighbor_itr)].center);
+						if(c_min_dist > dist_temp){
+							c_min_dist = dist_temp;
+							c_min_region = (*neighbor_itr);
+						}
+					}
+				}
 
-			if(b_dist_to_region < b_min_dist){
-				//Triangle 1 - b bc ccenter
-				divideIntegrate(div_levs,b,bc,ccenter,top_val,bot_val);
-				tops[b.idx] += top_val;
-				bots[b.idx] += bot_val;
+				if(a_dist_to_region < a_min_dist){
+					//Triangle 1 - a ab ccenter
+					divideIntegrate(div_levs,a,ab,ccenter,top_val,bot_val);
+					tops[a.idx] += top_val;
+					bots[a.idx] += bot_val;
 
-				//Triangle 2 - b ccenter ab
-				divideIntegrate(div_levs,b,ccenter,ab,top_val,bot_val);
-				tops[b.idx] += top_val;
-				bots[b.idx] += bot_val;
-			} else if (b_dist_to_region == b_min_dist && (*region_itr).center.idx < b_min_region){
-				//Triangle 1 - b bc ccenter
-				divideIntegrate(div_levs,b,bc,ccenter,top_val,bot_val);
-				tops[b.idx] += top_val;
-				bots[b.idx] += bot_val;
+					//Triangle 2 - a ccenter ca
+					divideIntegrate(div_levs,a,ccenter,ca,top_val,bot_val);
+					tops[a.idx] += top_val;
+					bots[a.idx] += bot_val;
+				} else if (a_dist_to_region == a_min_dist && (*region_itr).center.idx < a_min_region){
+					//Triangle 1 - a ab ccenter
+					divideIntegrate(div_levs,a,ab,ccenter,top_val,bot_val);
+					tops[a.idx] += top_val;
+					bots[a.idx] += bot_val;
 
-				//Triangle 2 - b ccenter ab
-				divideIntegrate(div_levs,b,ccenter,ab,top_val,bot_val);
-				tops[b.idx] += top_val;
-				bots[b.idx] += bot_val;
-			}
+					//Triangle 2 - a ccenter ca
+					divideIntegrate(div_levs,a,ccenter,ca,top_val,bot_val);
+					tops[a.idx] += top_val;
+					bots[a.idx] += bot_val;
+				}
 
-			if(c_dist_to_region < c_min_dist){
-				//Triangle 1 - c ca ccenter
-				divideIntegrate(div_levs,c,ca,ccenter,top_val,bot_val);
-				tops[c.idx] += top_val;
-				bots[c.idx] += bot_val;
+				if(b_dist_to_region < b_min_dist){
+					//Triangle 1 - b bc ccenter
+					divideIntegrate(div_levs,b,bc,ccenter,top_val,bot_val);
+					tops[b.idx] += top_val;
+					bots[b.idx] += bot_val;
 
-				//Triangle 2 - c ccenter bc
-				divideIntegrate(div_levs,c,ccenter,bc,top_val,bot_val);
-				tops[c.idx] += top_val;
-				bots[c.idx] += bot_val;
-			} else if (c_dist_to_region == c_min_dist && (*region_itr).center.idx < c_min_region){
-				//Triangle 1 - c ca ccenter
-				divideIntegrate(div_levs,c,ca,ccenter,top_val,bot_val);
-				tops[c.idx] += top_val;
-				bots[c.idx] += bot_val;
+					//Triangle 2 - b ccenter ab
+					divideIntegrate(div_levs,b,ccenter,ab,top_val,bot_val);
+					tops[b.idx] += top_val;
+					bots[b.idx] += bot_val;
+				} else if (b_dist_to_region == b_min_dist && (*region_itr).center.idx < b_min_region){
+					//Triangle 1 - b bc ccenter
+					divideIntegrate(div_levs,b,bc,ccenter,top_val,bot_val);
+					tops[b.idx] += top_val;
+					bots[b.idx] += bot_val;
 
-				//Triangle 2 - c ccenter bc
-				divideIntegrate(div_levs,c,ccenter,bc,top_val,bot_val);
-				tops[c.idx] += top_val;
-				bots[c.idx] += bot_val;
+					//Triangle 2 - b ccenter ab
+					divideIntegrate(div_levs,b,ccenter,ab,top_val,bot_val);
+					tops[b.idx] += top_val;
+					bots[b.idx] += bot_val;
+				}
+
+				if(c_dist_to_region < c_min_dist){
+					//Triangle 1 - c ca ccenter
+					divideIntegrate(div_levs,c,ca,ccenter,top_val,bot_val);
+					tops[c.idx] += top_val;
+					bots[c.idx] += bot_val;
+
+					//Triangle 2 - c ccenter bc
+					divideIntegrate(div_levs,c,ccenter,bc,top_val,bot_val);
+					tops[c.idx] += top_val;
+					bots[c.idx] += bot_val;
+				} else if (c_dist_to_region == c_min_dist && (*region_itr).center.idx < c_min_region){
+					//Triangle 1 - c ca ccenter
+					divideIntegrate(div_levs,c,ca,ccenter,top_val,bot_val);
+					tops[c.idx] += top_val;
+					bots[c.idx] += bot_val;
+
+					//Triangle 2 - c ccenter bc
+					divideIntegrate(div_levs,c,ccenter,bc,top_val,bot_val);
+					tops[c.idx] += top_val;
+					bots[c.idx] += bot_val;
+				}
 			}
 		}
 	}
 
 	n_points.clear();
 	for(point_itr = points.begin(); point_itr != points.end(); ++point_itr){
-		if(bots[(*point_itr).idx] != 0.0){
-			if(!(*point_itr).isBdry){
+		if(!(*point_itr).isBdry){
+			if(bots[(*point_itr).idx] != 0.0){
 				np = tops[(*point_itr).idx]/bots[(*point_itr).idx];
 				np.idx = (*point_itr).idx;
 				np.sides = sides[(*point_itr).idx];
 				np.isBdry = (*point_itr).isBdry;
 				np.normalize();
 				n_points.push_back(np);
-			} else if((*point_itr).isBdry){
-				if((*point_itr).isBdry == 2){
-					(*point_itr).isBdry = 0;
-				}
-
-				n_points.push_back((*point_itr));
 			}
+		} else if((*point_itr).isBdry){
+			if((*point_itr).isBdry == 2){
+				(*point_itr).isBdry = 0;
+			}
+
+			n_points.push_back((*point_itr));
 		}
 	}
 
@@ -2298,23 +2304,27 @@ void makeFinalTriangulations(vector<region> &region_vec){/*{{{*/
 			vi2 = b.idx;
 			vi3 = c.idx;
 
-			circumcenter(a,b,c,ccenter);
-			ccenter.normalize();
+			try {
+				circumcenter(a,b,c,ccenter);
+				ccenter.normalize();
+			} catch ( int n ) {
+				ccenter = (a + b + c) / 3.0;	
+			}
 
-            c_dist = ccenter.dotForAngle((*region_itr).center);
-            c_dist_min = 10.0;
+			c_dist = ccenter.dotForAngle((*region_itr).center);
+			c_dist_min = 10.0;
 
-            for(neighbor_itr = (*region_itr).neighbors.begin(); neighbor_itr != (*region_itr).neighbors.end(); ++neighbor_itr){
-                if((*neighbor_itr) != (*region_itr).center.idx){
-                    dist_temp = ccenter.dotForAngle(regions.at((*neighbor_itr)).center);
-                    c_dist_min = min(c_dist_min, dist_temp);
-                }
-            }
+			for(neighbor_itr = (*region_itr).neighbors.begin(); neighbor_itr != (*region_itr).neighbors.end(); ++neighbor_itr){
+				if((*neighbor_itr) != (*region_itr).center.idx){
+					dist_temp = ccenter.dotForAngle(regions.at((*neighbor_itr)).center);
+					c_dist_min = min(c_dist_min, dist_temp);
+				}
+			}
 
-            if(c_dist < c_dist_min){
+			if(c_dist < c_dist_min){
 				t = tri(vi1, vi2, vi3);
 				(*region_itr).triangles.push_back(t);
-            }
+			}
 		}
 		free(in.pointlist);
 		free(in.regionlist);

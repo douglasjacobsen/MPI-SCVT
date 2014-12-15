@@ -3,6 +3,7 @@
 #include <iostream>
 #include <iomanip>
 #include <fstream>
+#include <exception>
 
 #ifndef isnan
 # define isnan(x) \
@@ -134,13 +135,15 @@ class pnt {/*{{{*/
 				return z;
 			}
 		}/*}}}*/
-		void normalize(){/*{{{*/
+		void normalize() throw (int){/*{{{*/
 			double norm;
 
 			norm = x*x + y*y + z*z;
 			if(norm == 0){
 				std::cout << "pnt: normalize" << std::endl;
 				std::cout << x << " " << y << " " << z << " " << isBdry << " " << idx << std::endl;
+
+				throw 1;
 
 				assert(norm != 0);
 			}	
@@ -319,7 +322,7 @@ inline std::istream & operator>>(std::istream &is, tri &t){/*{{{*/
 	return is >> t.vi1 >> t.vi2 >> t.vi3;
 }/*}}}*/
 
-void circumcenter(const pnt &A,const pnt &B,const pnt &C, pnt &cent){/*{{{*/
+void circumcenter(const pnt &A,const pnt &B,const pnt &C, pnt &cent) throw (int) {/*{{{*/
 	double a, b, c;
 	double pbc, apc, abp;
 
